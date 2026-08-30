@@ -2,7 +2,7 @@
 
 ## 1. 系统概述
 
-基于 STM32F407VET6 的双机械臂电机控制固件。通过 4 路 RS485 总线控制 12 个电机（6 个 AI 电机 + 6 个慕纬度电机），上位机通过 UART 发送文本命令控制。
+基于 STM32F407VET6 的双机械臂电机控制固件。通过 4 路 RS485 总线控制 12 个电机（6 个 AI 电机 + 6 个慕纬度电机），上位机通过 UART 发送文本命令或二进制协议帧（AA 55，详见 API_Protocol_v1.0.md）控制。
 
 ## 2. 硬件
 
@@ -56,38 +56,46 @@ motor6_target = J6_deg × 20/9 × 100 - motor5_target
 ### 3.1 文件结构
 
 ```
-Core/
+App/                      ← 手写应用代码（CubeMX 重新生成不覆盖）
+├── Inc/
+│   ├── aimotor.h      — AI 电机模块头文件
+│   └── mwmotor.h      — MW 电机模块头文件
+└── Src/
+    ├── aimotor.c       — AI 电机 Modbus RTU 协议 + 状态机 + 上位机流解析/控制序列
+    └── mwmotor.c       — MW 电机私有协议 + 状态机 + 耦合解算
+
+Core/                     ← CubeMX 生成区
 ├── Inc/
 │   ├── main.h
-│   ├── aimotor.h      — AI 电机模块头文件
-│   ├── mwmotor.h      — MW 电机模块头文件
 │   ├── usart.h        — CubeMX 生成
 │   ├── dma.h          — CubeMX 生成
 │   └── gpio.h         — CubeMX 生成
 └── Src/
     ├── main.c          — 主入口，薄层编排
-    ├── aimotor.c       — AI 电机 Modbus RTU 协议 + 状态机
-    ├── mwmotor.c       — MW 电机私有协议 + 状态机 + 耦合解算
     ├── usart.c         — CubeMX 生成
     ├── dma.c           — CubeMX 生成
     ├── gpio.c          — CubeMX 生成
     └── stm32f4xx_it.c  — 中断服务函数
 ```
 
+Keil 工程对应分组：`Application/User/App`（aimotor.c/mwmotor.c 及头文件）与
+`Application/User/Core`（main.c 等）；包含路径已含 `../App/Inc`。
+
 ### 3.2 模块职责
 
 **main.c** — 主入口：
-- 初始化外设 → Aimotor_Init() → MW_Init() → 启动 DMA
-- 主循环每 50ms 调用 Aimotor_Process() + MW_Process()
-- HAL_UARTEx_RxEventCallback 分发 DMA 回包到对应模块
-- 维护全局上位机命令缓冲 `g_host_rx_buf[]`
+- 初始化外设 → Aimotor_Init() → MW_Init() → 启动 USART1 DMA 空闲接收
+- 主循环每 5ms 调度 Aimotor_Process()/Aimotor_CommWatchdog() 与 MW_Process()
+- HAL_UARTEx_RxEventCallback 按外设分发：USART1 字节追加到流解析环形缓冲，AI/MW 总线回包路由到对应模块
+- 定义 USART1 DMA 缓冲与命令缓冲（由 aimotor.c 的流解析填充/消费）
 
 **aimotor.c** — AI 电机模块：
 - Modbus RTU 协议实现（06H/10H/03H，CRC16）
 - 每电机私有 RX 缓冲（避免同总线多电机回包覆盖）
 - 后台自动轮询：空闲电机持续查询位置，保持缓存最新
 - 运动状态机：STOP→WRITE→TRIGGER→QUERY→WAIT_RX→IDLE
-- 上位机命令解析（B1/B2 前缀）
+- 上位机流解析（环形缓冲拆包/粘包/CRC 重同步 + 文本行提取），文本 B/ALL 与二进制 AA 55 命令解析执行
+- 异步控制序列（ENABLE/STOP/DISABLE/上电安全停止/回滚）与主机通信看门狗
 
 **mwmotor.c** — MW 电机模块：
 - 私有协议实现（帧头 0x3E，和校验）
@@ -98,21 +106,23 @@ Core/
 ### 3.3 数据流
 
 ```
-上位机(PC) ──USART1──→ main.c callback ─→ g_host_rx_buf[]
+上位机(PC) ──USART1──→ main.c 回调 ─→ Aimotor_HostRxAppend() 环形缓冲
                                               │
-                    ┌─────────────────────────┤
-                    ▼                         ▼
-              aimotor_Process()         mwmotor_Process()
-              (B/ALL 命令)              (L/R 命令)
-                    │                         │
-                    ▼                         ▼
-              状态机执行                 状态机执行
-              Modbus 命令               0x3E 命令
-                    │                         │
-          ┌─────────┤               ┌─────────┤
-          ▼         ▼               ▼         ▼
-       USART2    USART3          USART6    UART5
-       (左AI)    (右AI)          (左MW)    (右MW)
+                            Aimotor_HostStreamPoll() 主循环解析
+                    （拆包/粘包/CRC 重同步 + 文本行提取）
+                              │                       │
+              二进制帧/B/ALL 文本行              L/R 文本行（转发 g_host_rx_buf）
+                              ▼                       ▼
+                      Aimotor_Process()         MW_Process()
+                              │                       │
+                              ▼                       ▼
+                        状态机执行                 状态机执行
+                        Modbus 命令               0x3E 命令
+                              │                       │
+                    ┌─────────┤               ┌─────────┤
+                    ▼         ▼               ▼         ▼
+                 USART2    USART3          USART6    UART5
+                 (左AI)    (右AI)          (左MW)    (右MW)
 ```
 
 ### 3.4 核心数据结构
@@ -197,7 +207,7 @@ IDLE → QUERY → WAIT_RX → (收到回包) → ProcessRx → IDLE
                           更新 actual_position
 ```
 
-每电机通过 round-robin 调度，约每 150ms 查询一次。回包通过 DMA 回调按从站号路由到对应电机的私有缓冲，避免同总线电机互相覆盖。
+每电机通过 round-robin 调度（5ms tick，每 tick 每总线处理一个电机），约每 15ms 轮到一次查询。回包通过 DMA 回调按从站号路由到对应电机的私有缓冲，避免同总线电机互相覆盖。
 
 ### 5.2 运动序列（上位机命令触发）
 
@@ -207,13 +217,14 @@ IDLE → (cmd_pending=1) → STOP → WRITE → TRIGGER → QUERY → WAIT_RX �
                                                          └────────────────┘
 ```
 
-每个步骤在独立 tick 中执行（50ms tick × 3 电机轮转 = 每步 150ms）。
+每个步骤在独立 tick 中执行（5ms tick；同一总线存在未完成请求时该总线只推进该事务，保证 RS485 半双工一次一帧）。
 
 ### 5.3 DMA RX 回包处理
 
 ```
 HAL_UARTEx_RxEventCallback (main.c)
-  ├── USART1? → 写入 g_host_rx_buf → g_host_rx_ready=1
+  ├── USART1? → g_host_dma_buf → Aimotor_HostRxAppend() 追加入环形缓冲并重启 DMA
+  │              （主循环 Aimotor_HostStreamPoll() 完成拆包/CRC/文本行提取）
   ├── AI 总线? → Aimotor_RxCallback → 按 slave_id 路由到电机私有缓冲
   └── MW 总线? → MW_RxCallback → 按 ID 路由到电机私有缓冲
 ```
@@ -221,8 +232,13 @@ HAL_UARTEx_RxEventCallback (main.c)
 ### 5.4 命令分发（避免消费竞争）
 
 ```
+Aimotor_HostStreamPoll()（aimotor.c，主循环）:
+  二进制帧  → CRC 校验后执行（ACK/STATE 应答，有效帧刷新看门狗）
+  B/A 文本行 → 写入 g_host_cmd_buf（g_host_cmd_ready=1）
+  L/R 文本行 → 转发写入 g_host_rx_buf（g_host_rx_ready=1）
+
 Aimotor_Process():
-  if g_host_rx_ready && 首字符∈{B,A} → 消费，解析 B/ALL 命令
+  if g_host_cmd_ready && 首字符∈{B,A} → 消费，解析 B/ALL 命令
 
 MW_Process():
   if g_host_rx_ready && 首字符∈{L,R} → 消费，解析 L/R 命令
