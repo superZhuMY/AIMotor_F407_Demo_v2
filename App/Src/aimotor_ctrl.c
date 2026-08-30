@@ -16,6 +16,9 @@
 /* 控制序列状态（类型定义见 aimotor_internal.h） */
 CtrlSeq_t g_ctrl_seq;
 
+/* 前向声明：CtrlSeqFinish 的 ENABLE 失败路径先于定义处调用回滚构建 */
+static void CtrlSeqBuildRollback(void);
+
 /* 清空全部待执行目标与重试任务（STOP/DISABLE/看门狗/新事务开始时调用） */
 void ClearAllPending(void)
 {

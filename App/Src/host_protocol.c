@@ -27,21 +27,21 @@
 /* ======================================================================== */
 
 static uint8_t  g_host_rx_ring[PROTOCOL_RX_BUFFER_SIZE];
-static volatile uint16_t g_host_ring_head = 0;  /* 下一个写入位置 */
-static volatile uint16_t g_host_ring_tail = 0;  /* 下一个读取位置 */
+volatile uint16_t g_host_ring_head = 0;  /* 下一个写入位置 */
+volatile uint16_t g_host_ring_tail = 0;  /* 下一个读取位置 */
 
 /* 文本行提取缓冲（流解析 → 现有命令缓冲） */
 static char     g_host_text_buf[64];
-static uint16_t g_host_text_len = 0;
+uint16_t g_host_text_len = 0;
 static uint32_t g_host_text_activity_tick = 0;
 
 /* ======================================================================== */
 /*                      安全层：控制状态机 + 通信看门狗                        */
 /* ======================================================================== */
 
-static ControlState_t g_control_state = CONTROL_DISABLED;
-static uint8_t        g_control_faults = CONTROL_FAULT_NONE;
-static uint32_t       g_last_valid_frame_ms = 0;  /* 上次有效命令时间 */
+ControlState_t g_control_state = CONTROL_DISABLED;
+uint8_t        g_control_faults = CONTROL_FAULT_NONE;
+uint32_t       g_last_valid_frame_ms = 0;  /* 上次有效命令时间 */
 
 /* ── 上位机命令槽（原 main.c 定义随协议层迁入；旧别名 g_host_rx_* 更名 g_mw_cmd_*） ── */
 char              g_host_cmd_buf[64];   /* 命令缓冲（流解析填充，Aimotor_Process 消费） */
@@ -771,7 +771,7 @@ uint8_t HostCmd_Parse(const uint8_t *buf, uint16_t len, Aimotor_Cmd_t *cmd)
 /*                       上位机命令执行                                     */
 /* ======================================================================== */
 
-static void HostCmd_Execute(const Aimotor_Cmd_t *cmd)
+void HostCmd_Execute(const Aimotor_Cmd_t *cmd)
 {
     if (!cmd || !cmd->valid) return;
 
