@@ -26,7 +26,7 @@
 /* USER CODE BEGIN Includes */
 #include "aimotor.h"
 #include "mwmotor.h"
-#include <string.h>
+#include "host_protocol.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -48,22 +48,9 @@
 
 /* USER CODE BEGIN PV */
 
-uint32_t aimotor_last_tick = 0;
-uint32_t mwmotor_last_tick = 0;
-
-/* 分离的上位机缓冲：DMA接收、命令解析、发送回复 */
-uint8_t g_host_dma_buf[64];
-char    g_host_cmd_buf[64];   /* 命令缓冲（流解析填充，aimotor.c 消费） */
-char    g_host_tx_buf[96];
-
-/* 命令缓冲由 aimotor.c 的流解析（环形缓冲）填充，主循环消费 */
-volatile uint16_t g_host_cmd_len = 0;
-volatile uint8_t  g_host_cmd_ready = 0;
-
-/* 旧名称兼容别名（供 mwmotor.c 等模块引用，不直接使用） */
-uint8_t            g_host_rx_buf[64];
-volatile uint16_t  g_host_rx_len = 0;
-volatile uint8_t   g_host_rx_ready = 0;
+/* 主循环节拍（5ms 调度）；上位机协议缓冲所有权已移至 App/Src/host_protocol.c */
+static uint32_t aimotor_last_tick = 0;
+static uint32_t mwmotor_last_tick = 0;
 
 /* USER CODE END PV */
 
@@ -75,50 +62,7 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-
-/**
-  * @brief  DMA + IDLE 空闲中断回调路由
-  *         按 USART 外设分发到对应模块
-  */
-void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
-{
-    /* USART1: 上位机字节流 — 只把本次收到的字节追加入环形缓冲，
-       拆包/粘包/CRC 校验/文本行提取全部在主循环的流解析中完成。 */
-    if (huart->Instance == USART1) {
-        if (Size > sizeof(g_host_dma_buf)) {
-            Size = sizeof(g_host_dma_buf);
-        }
-        Aimotor_HostRxAppend(g_host_dma_buf, Size);
-        HAL_UARTEx_ReceiveToIdle_DMA(&huart1, g_host_dma_buf,
-                                     sizeof(g_host_dma_buf));
-        __HAL_DMA_DISABLE_IT(huart->hdmarx, DMA_IT_HT);
-        return;
-    }
-
-    /* AI 电机总线 (USART2=左, USART3=右) */
-    Aimotor_RxCallback(huart, Size);
-
-    /* 慕纬度电机总线 (USART6=左, UART5=右) */
-    MW_RxCallback(huart, Size);
-}
-
-void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
-{
-    if (huart->Instance == USART1) {
-        HAL_UART_AbortReceive(huart);
-        __HAL_UART_CLEAR_OREFLAG(huart);
-        __HAL_UART_CLEAR_NEFLAG(huart);
-        __HAL_UART_CLEAR_FEFLAG(huart);
-        __HAL_UART_CLEAR_PEFLAG(huart);
-        HAL_UARTEx_ReceiveToIdle_DMA(&huart1, g_host_dma_buf,
-                                     sizeof(g_host_dma_buf));
-        __HAL_DMA_DISABLE_IT(huart->hdmarx, DMA_IT_HT);
-        return;
-    }
-
-    Aimotor_RecoverRx(huart);
-    MW_RecoverRx(huart);
-}
+/* UART 回调分发已迁至 App/Src/comm_router.c */
 
 /* USER CODE END 0 */
 
@@ -159,9 +103,8 @@ int main(void)
   MX_USART6_UART_Init();
   /* USER CODE BEGIN 2 */
 
-		/* 启动上位机 USART1 DMA 空闲接收 */
-		HAL_UARTEx_ReceiveToIdle_DMA(&huart1, g_host_dma_buf, sizeof(g_host_dma_buf));
-        __HAL_DMA_DISABLE_IT(huart1.hdmarx, DMA_IT_HT);
+		/* 初始化上位机协议层（USART1 DMA 空闲接收，实现在 App/Src/host_protocol.c） */
+		Host_ProtocolInit();
 		/* 初始化 AI 电机系统（USART2/USART3, Modbus RTU） */
 		Aimotor_Init();
 		/* 初始化慕纬度电机系统（USART6/UART5, 私有协议） */

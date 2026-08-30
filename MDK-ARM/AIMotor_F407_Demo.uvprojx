@@ -450,6 +450,41 @@
               <FileType>5</FileType>
               <FilePath>../App/Inc/mwmotor.h</FilePath>
             </File>
+            <File>
+              <FileName>aimotor_modbus.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../App/Src/aimotor_modbus.c</FilePath>
+            </File>
+            <File>
+              <FileName>aimotor_ctrl.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../App/Src/aimotor_ctrl.c</FilePath>
+            </File>
+            <File>
+              <FileName>host_protocol.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../App/Src/host_protocol.c</FilePath>
+            </File>
+            <File>
+              <FileName>aimotor_selftest.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../App/Src/aimotor_selftest.c</FilePath>
+            </File>
+            <File>
+              <FileName>comm_router.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../App/Src/comm_router.c</FilePath>
+            </File>
+            <File>
+              <FileName>aimotor_internal.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../App/Inc/aimotor_internal.h</FilePath>
+            </File>
+            <File>
+              <FileName>host_protocol.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../App/Inc/host_protocol.h</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
