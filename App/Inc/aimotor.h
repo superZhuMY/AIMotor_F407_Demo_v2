@@ -131,7 +131,8 @@ typedef enum {
 /* 12 轴轴序位图（side*6 + joint，bit0..5=L_J1..L_J6，bit6..11=R_J1..R_J6） */
 #define AIMOTOR_AXIS_BIT(side, joint) ((uint16_t)(1U << ((side) * 6U + (joint))))
 
-/** @brief 单电机运动事务步骤：STOP→WRITE→TRIGGER→QUERY→WAIT_*→IDLE */
+/** @brief 单电机运动/轮询步骤：运动序列 STOP→WRITE→TRIGGER 后回 IDLE（v1.4）；
+ *         QUERY/WAIT_QUERY 供空闲轮询位置刷新与到位判断使用 */
 typedef enum {
     MOTOR_STEP_IDLE    = 0,   // 空闲（无命令可执行）
     MOTOR_STEP_STOP    = 1,   // 发送停止 (10H -> 0x0305=0)

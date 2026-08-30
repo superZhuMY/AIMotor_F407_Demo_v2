@@ -378,13 +378,21 @@ void Aimotor_Process(void)
                     motor->step = MOTOR_STEP_TRIGGER;
                     break;
                 case MOTOR_STEP_WAIT_TRIGGER:
-                    motor->step = MOTOR_STEP_QUERY;
+#if AIMOTOR_ENABLE_ARRIVAL_CHECK
+                    /* 到位判断：直连偏差查询（0x0B15），跳过 0x0B07 位置读取 */
+                    motor->step = MOTOR_STEP_QUERY_ERROR;
+#else
+                    /* 触发已确认，运动序列结束（QUERY 移交空闲轮询：
+                       每次运动省一次总线往返；手册 §5.2 要求每次运动前
+                       重新导通多段位使能，故 STOP 步不可省） */
+                    motor->step = MOTOR_STEP_IDLE;
+#endif
                     break;
                 case MOTOR_STEP_WAIT_QUERY:
+                    /* 本步仅空闲轮询（IDLE→QUERY）进入：缓存位置并置 actual_valid */
 #if AIMOTOR_ENABLE_ARRIVAL_CHECK
                     motor->step = MOTOR_STEP_QUERY_ERROR;
 #else
-                    /* 到位检测暂时注释：先验证位置读写和通信稳定性。 */
                     motor->step = MOTOR_STEP_IDLE;
 #endif
                     break;
