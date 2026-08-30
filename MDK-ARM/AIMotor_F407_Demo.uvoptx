@@ -231,7 +231,7 @@
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
       <bDave2>0</bDave2>
-      <PathWithFileName>..\Core\Src\aimotor.c</PathWithFileName>
+      <PathWithFileName>../App/Src/aimotor.c</PathWithFileName>
       <FilenameWithoutPath>aimotor.c</FilenameWithoutPath>
       <RteFlg>0</RteFlg>
       <bShared>0</bShared>
@@ -315,7 +315,7 @@
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
       <bDave2>0</bDave2>
-      <PathWithFileName>../Core/Src/mwmotor.c</PathWithFileName>
+      <PathWithFileName>../App/Src/mwmotor.c</PathWithFileName>
       <FilenameWithoutPath>mwmotor.c</FilenameWithoutPath>
       <RteFlg>0</RteFlg>
       <bShared>0</bShared>
@@ -327,7 +327,7 @@
       <tvExp>0</tvExp>
       <tvExpOptDlg>0</tvExpOptDlg>
       <bDave2>0</bDave2>
-      <PathWithFileName>../Core/Inc/mwmotor.h</PathWithFileName>
+      <PathWithFileName>../App/Inc/mwmotor.h</PathWithFileName>
       <FilenameWithoutPath>mwmotor.h</FilenameWithoutPath>
       <RteFlg>0</RteFlg>
       <bShared>0</bShared>

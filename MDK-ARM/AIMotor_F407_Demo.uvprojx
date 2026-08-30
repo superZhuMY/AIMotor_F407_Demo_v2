@@ -341,7 +341,7 @@
               <MiscControls></MiscControls>
               <Define>USE_HAL_DRIVER,STM32F407xx</Define>
               <Undefine></Undefine>
-              <IncludePath>../Core/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32F4xx/Include;../Drivers/CMSIS/Include</IncludePath>
+              <IncludePath>../Core/Inc;../App/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc;../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy;../Drivers/CMSIS/Device/ST/STM32F4xx/Include;../Drivers/CMSIS/Include</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -396,11 +396,6 @@
           <GroupName>Application/User/Core</GroupName>
           <Files>
             <File>
-              <FileName>aimotor.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\Core\Src\aimotor.c</FilePath>
-            </File>
-            <File>
               <FileName>main.c</FileName>
               <FileType>1</FileType>
               <FilePath>../Core/Src/main.c</FilePath>
@@ -430,15 +425,30 @@
               <FileType>1</FileType>
               <FilePath>../Core/Src/stm32f4xx_hal_msp.c</FilePath>
             </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>Application/User/App</GroupName>
+          <Files>
+            <File>
+              <FileName>aimotor.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../App/Src/aimotor.c</FilePath>
+            </File>
             <File>
               <FileName>mwmotor.c</FileName>
               <FileType>1</FileType>
-              <FilePath>../Core/Src/mwmotor.c</FilePath>
+              <FilePath>../App/Src/mwmotor.c</FilePath>
+            </File>
+            <File>
+              <FileName>aimotor.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>../App/Inc/aimotor.h</FilePath>
             </File>
             <File>
               <FileName>mwmotor.h</FileName>
               <FileType>5</FileType>
-              <FilePath>../Core/Inc/mwmotor.h</FilePath>
+              <FilePath>../App/Inc/mwmotor.h</FilePath>
             </File>
           </Files>
         </Group>
