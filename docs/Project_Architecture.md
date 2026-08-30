@@ -58,11 +58,18 @@ motor6_target = J6_deg × 20/9 × 100 - motor5_target
 ```
 App/                      ← 手写应用代码（CubeMX 重新生成不覆盖）
 ├── Inc/
-│   ├── aimotor.h      — AI 电机模块头文件
-│   └── mwmotor.h      — MW 电机模块头文件
+│   ├── aimotor.h          — AI 电机公共 API（Init/Process/回调/Modbus 命令）
+│   ├── aimotor_internal.h — aimotor 家族内部共享符号（控制状态/命令槽/序列类型/自检钩子）
+│   ├── host_protocol.h    — 上位机协议层公共 API（Host_ProtocolInit/Host_ReplyBytes）
+│   └── mwmotor.h          — MW 电机公共 API
 └── Src/
-    ├── aimotor.c       — AI 电机 Modbus RTU 协议 + 状态机 + 上位机流解析/控制序列
-    └── mwmotor.c       — MW 电机私有协议 + 状态机 + 耦合解算
+    ├── aimotor.c          — 电机核心：数组/初始化/DMA 回调路由/单电机状态机
+    ├── aimotor_modbus.c   — Modbus RTU 编解码与 RS485 发送（CRC16/CDAB/命令帧）
+    ├── aimotor_ctrl.c     — 异步控制序列（ENABLE/STOP/DISABLE/上电安全停止/回滚）
+    ├── host_protocol.c    — 上位机协议层：控制状态/看门狗/流解析/二进制帧/文本命令
+    ├── aimotor_selftest.c — 固件自检（AIMOTOR_SELF_TEST=1 时编译）
+    ├── comm_router.c      — HAL UART 回调分发（按外设路由到各模块）
+    └── mwmotor.c          — MW 电机私有协议 + 状态机 + J5/J6 耦合解算
 
 Core/                     ← CubeMX 生成区
 ├── Inc/
@@ -71,31 +78,30 @@ Core/                     ← CubeMX 生成区
 │   ├── dma.h          — CubeMX 生成
 │   └── gpio.h         — CubeMX 生成
 └── Src/
-    ├── main.c          — 主入口，薄层编排
+    ├── main.c          — 主入口，薄层编排（仅初始化调用与 5ms 调度）
     ├── usart.c         — CubeMX 生成
     ├── dma.c           — CubeMX 生成
     ├── gpio.c          — CubeMX 生成
     └── stm32f4xx_it.c  — 中断服务函数
 ```
 
-Keil 工程对应分组：`Application/User/App`（aimotor.c/mwmotor.c 及头文件）与
+Keil 工程对应分组：`Application/User/App`（App/Src 与 App/Inc 全部文件）与
 `Application/User/Core`（main.c 等）；包含路径已含 `../App/Inc`。
 
 ### 3.2 模块职责
 
-**main.c** — 主入口：
-- 初始化外设 → Aimotor_Init() → MW_Init() → 启动 USART1 DMA 空闲接收
+**main.c** — 主入口（薄层编排）：
+- 初始化外设 → Host_ProtocolInit() → Aimotor_Init() → MW_Init()
 - 主循环每 5ms 调度 Aimotor_Process()/Aimotor_CommWatchdog() 与 MW_Process()
-- HAL_UARTEx_RxEventCallback 按外设分发：USART1 字节追加到流解析环形缓冲，AI/MW 总线回包路由到对应模块
-- 定义 USART1 DMA 缓冲与命令缓冲（由 aimotor.c 的流解析填充/消费）
+- UART 回调分发在 comm_router.c；协议缓冲所有权在 host_protocol.c
 
-**aimotor.c** — AI 电机模块：
-- Modbus RTU 协议实现（06H/10H/03H，CRC16）
-- 每电机私有 RX 缓冲（避免同总线多电机回包覆盖）
-- 后台自动轮询：空闲电机持续查询位置，保持缓存最新
-- 运动状态机：STOP→WRITE→TRIGGER→QUERY→WAIT_RX→IDLE
-- 上位机流解析（环形缓冲拆包/粘包/CRC 重同步 + 文本行提取），文本 B/ALL 与二进制 AA 55 命令解析执行
-- 异步控制序列（ENABLE/STOP/DISABLE/上电安全停止/回滚）与主机通信看门狗
+**aimotor.c + aimotor_modbus.c + aimotor_ctrl.c + host_protocol.c** — AI 电机模块群：
+- aimotor.c：电机/总线数据结构、初始化、DMA 回包按从站号路由、单电机运动状态机（STOP→WRITE→TRIGGER→QUERY）
+- aimotor_modbus.c：Modbus RTU 编解码（06H/10H/03H，CRC16，CDAB 字节序）与 RS485 发送
+- aimotor_ctrl.c：异步控制序列（ENABLE/STOP/DISABLE/上电安全停止/失败回滚），每台电机回包确认
+- host_protocol.c：控制状态机（DISABLED/ENABLED/STOPPED/FAULT）、250ms 通信看门狗、上位机流解析（环形缓冲拆包/粘包/CRC 重同步 + 文本行提取）、二进制 AA 55 帧与文本 B/ALL 命令解析执行、STATE 上报
+- aimotor_selftest.c：固件自检（DRY_RUN 下覆盖生产函数，60 项）
+- comm_router.c：HAL UART 回调按外设分发
 
 **mwmotor.c** — MW 电机模块：
 - 私有协议实现（帧头 0x3E，和校验）
@@ -222,7 +228,7 @@ IDLE → (cmd_pending=1) → STOP → WRITE → TRIGGER → QUERY → WAIT_RX �
 ### 5.3 DMA RX 回包处理
 
 ```
-HAL_UARTEx_RxEventCallback (main.c)
+HAL_UARTEx_RxEventCallback (comm_router.c)
   ├── USART1? → g_host_dma_buf → Aimotor_HostRxAppend() 追加入环形缓冲并重启 DMA
   │              （主循环 Aimotor_HostStreamPoll() 完成拆包/CRC/文本行提取）
   ├── AI 总线? → Aimotor_RxCallback → 按 slave_id 路由到电机私有缓冲
@@ -232,7 +238,7 @@ HAL_UARTEx_RxEventCallback (main.c)
 ### 5.4 命令分发（避免消费竞争）
 
 ```
-Aimotor_HostStreamPoll()（aimotor.c，主循环）:
+Aimotor_HostStreamPoll()（host_protocol.c，主循环）:
   二进制帧  → CRC 校验后执行（ACK/STATE 应答，有效帧刷新看门狗）
   B/A 文本行 → 写入 g_host_cmd_buf（g_host_cmd_ready=1）
   L/R 文本行 → 转发写入 g_host_rx_buf（g_host_rx_ready=1）

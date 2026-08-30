@@ -12,9 +12,14 @@ AIMotor_F407_Demo/
 ├── AIMotor_F407_Demo.ioc   # CubeMX 工程文件
 ├── Core/                    # CubeMX 生成区（main/usart/dma/gpio 等，勿手工改）
 ├── App/                     # 手写应用代码（CubeMX 重新生成不覆盖）
-│   ├── Src/aimotor.c        # AI 电机 Modbus RTU + 状态机 + 上位机流解析/控制序列
+│   ├── Src/aimotor.c        # 电机核心：数组/初始化/DMA 回调路由/单电机状态机
+│   ├── Src/aimotor_modbus.c # Modbus RTU 编解码与 RS485 发送
+│   ├── Src/aimotor_ctrl.c   # 异步控制序列（ENABLE/STOP/DISABLE/安全停止）
+│   ├── Src/host_protocol.c  # 上位机协议层：流解析/二进制帧/看门狗/控制状态
+│   ├── Src/aimotor_selftest.c # 固件自检（DRY_RUN + SELF_TEST 编译配置）
+│   ├── Src/comm_router.c    # HAL UART 回调分发
 │   ├── Src/mwmotor.c        # MW 电机 0x3E 协议 + 状态机 + J5/J6 耦合解算
-│   └── Inc/                 # 对应头文件
+│   └── Inc/                 # 对应头文件（含 aimotor_internal.h 内部接口）
 ├── Drivers/                 # STM32F4 HAL + CMSIS（CubeMX 管理）
 ├── MDK-ARM/                 # Keil 工程（构建产物已被 .gitignore 排除）
 ├── docs/                    # 架构 / 协议 / 驱动 / 返修记录
