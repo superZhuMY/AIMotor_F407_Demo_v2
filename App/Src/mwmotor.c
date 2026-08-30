@@ -11,6 +11,7 @@
 #include "mwmotor.h"
 #include "aimotor.h"   /* Aimotor_RefreshHostWatchdog() */
 #include "aimotor_internal.h"   /* g_mw_cmd_* 命令槽 */
+#include "host_protocol.h"   /* Host_ReplyBytes() */
 #include "usart.h"
 #include <string.h>
 #include <stdlib.h>
@@ -44,6 +45,8 @@ static MwIdleReadState_t mw_idle_owner[MW_BUS_COUNT];
 static MwIdleReadState_t mw_idle_next[MW_BUS_COUNT];
 
 /* 上位机 L/R 文本命令槽：host_protocol.c 的流解析填充，经 aimotor_internal.h 共享 */
+/* MW 文本回复缓冲：中断发送要求缓冲在发送期间保持稳定，不能复用命令槽 */
+static char g_mw_reply_buf[96];
 
 /* 静态函数 */
 static void ProcessRx(uint8_t bus_idx, uint8_t motor_idx);
@@ -275,9 +278,9 @@ static void MW_CmdParse(void)
        不再连续发送 3 个 0x80 并直接清零 enabled。 */
     if (strstr((const char *)buf, "STOP") || strstr((const char *)buf, "stop")) {
         Aimotor_ControlStopStart();
-        int n = snprintf((char *)g_mw_cmd_buf, sizeof(g_mw_cmd_buf),
+        int n = snprintf(g_mw_reply_buf, sizeof(g_mw_reply_buf),
                          "OK STOP: ACCEPTED\r\n");
-        HAL_UART_Transmit(&huart1, (uint8_t *)g_mw_cmd_buf, n, 100);
+        Host_ReplyBytes((const uint8_t *)g_mw_reply_buf, (uint16_t)n);
         return;
     }
 
@@ -294,10 +297,10 @@ static void MW_CmdParse(void)
         if (side == 1) j5_deg = (int16_t)-j5_deg;
         int16_t j6_deg = (int16_t)((angles[2] + angles[1]) * 9 / 20000);
 
-        int n = snprintf((char *)g_mw_cmd_buf, sizeof(g_mw_cmd_buf),
+        int n = snprintf(g_mw_reply_buf, sizeof(g_mw_reply_buf),
                          "POS %c J4=%d J5=%d J6=%d\r\n",
                          side == 0 ? 'L' : 'R', j4_deg, j5_deg, j6_deg);
-        HAL_UART_Transmit(&huart1, (uint8_t *)g_mw_cmd_buf, n, 100);
+        Host_ReplyBytes((const uint8_t *)g_mw_reply_buf, (uint16_t)n);
         return;
     }
 
@@ -307,25 +310,25 @@ static void MW_CmdParse(void)
         strstr((const char *)buf, "J4") || strstr((const char *)buf, "J5") ||
         strstr((const char *)buf, "J6") || strstr((const char *)buf, "j4") ||
         strstr((const char *)buf, "j5") || strstr((const char *)buf, "j6")) {
-        int n = snprintf((char *)g_mw_cmd_buf, sizeof(g_mw_cmd_buf),
+        int n = snprintf(g_mw_reply_buf, sizeof(g_mw_reply_buf),
                          "ERR TEXT MOTION DISABLED\r\n");
-        HAL_UART_Transmit(&huart1, (uint8_t *)g_mw_cmd_buf, n, 100);
+        Host_ReplyBytes((const uint8_t *)g_mw_reply_buf, (uint16_t)n);
         return;
     }
     return;
 #else
     /* 调试配置：文本运动命令必须经过与二进制相同的控制状态检查 */
     if (Aimotor_GetControlState() != CONTROL_ENABLED) {
-        int n = snprintf((char *)g_mw_cmd_buf, sizeof(g_mw_cmd_buf),
+        int n = snprintf(g_mw_reply_buf, sizeof(g_mw_reply_buf),
                          "ERR CONTROL DENIED\r\n");
-        HAL_UART_Transmit(&huart1, (uint8_t *)g_mw_cmd_buf, n, 100);
+        Host_ReplyBytes((const uint8_t *)g_mw_reply_buf, (uint16_t)n);
         return;
     }
     if (mw_coupled[side].fault || mw_motors[side][0].fault ||
         mw_motors[side][1].fault || mw_motors[side][2].fault) {
-        int n = snprintf((char *)g_mw_cmd_buf, sizeof(g_mw_cmd_buf),
+        int n = snprintf(g_mw_reply_buf, sizeof(g_mw_reply_buf),
                          "ERR AXIS FAULT: STOP THEN ENABLE\r\n");
-        HAL_UART_Transmit(&huart1, (uint8_t *)g_mw_cmd_buf, n, 100);
+        Host_ReplyBytes((const uint8_t *)g_mw_reply_buf, (uint16_t)n);
         return;
     }
 #endif
@@ -362,9 +365,9 @@ static void MW_CmdParse(void)
             mw_coupled[side].pending = 1;
         }
 
-        int n = snprintf((char *)g_mw_cmd_buf, sizeof(g_mw_cmd_buf),
+        int n = snprintf(g_mw_reply_buf, sizeof(g_mw_reply_buf),
                          "OK %c HOME\r\n", side == 0 ? 'L' : 'R');
-        HAL_UART_Transmit(&huart1, (uint8_t *)g_mw_cmd_buf, n, 100);
+        Host_ReplyBytes((const uint8_t *)g_mw_reply_buf, (uint16_t)n);
         return;
     }
 
@@ -413,9 +416,9 @@ static void MW_CmdParse(void)
 
         int64_t m4, m5, m6;
         if (MW_ForwardKin(side, j4d, j5d, j6d, &m4, &m5, &m6) != 0) {
-            int n = snprintf((char *)g_mw_cmd_buf, sizeof(g_mw_cmd_buf),
+            int n = snprintf(g_mw_reply_buf, sizeof(g_mw_reply_buf),
                              "ERR OUT OF RANGE\r\n");
-            HAL_UART_Transmit(&huart1, (uint8_t *)g_mw_cmd_buf, n, 100);
+            Host_ReplyBytes((const uint8_t *)g_mw_reply_buf, (uint16_t)n);
             return;
         }
 
@@ -435,10 +438,10 @@ static void MW_CmdParse(void)
         }
 
         /* 回显 */
-        int n = snprintf((char *)g_mw_cmd_buf, sizeof(g_mw_cmd_buf),
+        int n = snprintf(g_mw_reply_buf, sizeof(g_mw_reply_buf),
                          "OK %c J4=%d J5=%d J6=%d S=%d\r\n",
                          side == 0 ? 'L' : 'R', j4, j5, j6, speed / 100);
-        HAL_UART_Transmit(&huart1, (uint8_t *)g_mw_cmd_buf, n, 100);
+        Host_ReplyBytes((const uint8_t *)g_mw_reply_buf, (uint16_t)n);
     }
 }
 

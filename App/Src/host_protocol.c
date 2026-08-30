@@ -94,7 +94,7 @@ void BinarySendAck(uint16_t seq, uint8_t cmd, uint8_t result)
         return;
     }
 #endif
-    HAL_UART_Transmit(&huart1, out, sizeof(out), 100);
+    Host_ReplyBytes(out, sizeof(out));
 }
 
 /* 关节位置 → 关节侧单位逆换算辅助（µrad） */
@@ -217,7 +217,7 @@ static void Aimotor_SendState(uint16_t seq)
         return;
     }
 #endif
-    HAL_UART_Transmit(&huart1, out, n, 100);
+    Host_ReplyBytes(out, n);
 }
 
 /* ======================================================================== */
@@ -694,7 +694,7 @@ uint8_t HostCmd_Parse(const uint8_t *buf, uint16_t len, Aimotor_Cmd_t *cmd)
     if (!m_ptr) {
         int n = snprintf(g_host_tx_buf, sizeof(g_host_tx_buf),
                          "ERR INVALID COMMAND\r\n");
-        HAL_UART_Transmit(&huart1, (uint8_t *)g_host_tx_buf, n, 100);
+        Host_ReplyBytes((uint8_t *)g_host_tx_buf, (uint16_t)n);
         return 0;
     }
 
@@ -702,7 +702,7 @@ uint8_t HostCmd_Parse(const uint8_t *buf, uint16_t len, Aimotor_Cmd_t *cmd)
     if (cmd->motor_idx >= AIMOTOR_MOTORS_PER) {
         int n = snprintf(g_host_tx_buf, sizeof(g_host_tx_buf),
                          "ERR INVALID MOTOR\r\n");
-        HAL_UART_Transmit(&huart1, (uint8_t *)g_host_tx_buf, n, 100);
+        Host_ReplyBytes((uint8_t *)g_host_tx_buf, (uint16_t)n);
         return 0;
     }
 
@@ -740,7 +740,7 @@ uint8_t HostCmd_Parse(const uint8_t *buf, uint16_t len, Aimotor_Cmd_t *cmd)
     if (!p_ptr) {
         int n = snprintf(g_host_tx_buf, sizeof(g_host_tx_buf),
                          "ERR INVALID COMMAND\r\n");
-        HAL_UART_Transmit(&huart1, (uint8_t *)g_host_tx_buf, n, 100);
+        Host_ReplyBytes((uint8_t *)g_host_tx_buf, (uint16_t)n);
         return 0;
     }
 
@@ -749,7 +749,7 @@ uint8_t HostCmd_Parse(const uint8_t *buf, uint16_t len, Aimotor_Cmd_t *cmd)
         /* ParsePosition 失败：可能是格式错误或超范围 */
         int n = snprintf(g_host_tx_buf, sizeof(g_host_tx_buf),
                          "ERR INVALID POSITION\r\n");
-        HAL_UART_Transmit(&huart1, (uint8_t *)g_host_tx_buf, n, 100);
+        Host_ReplyBytes((uint8_t *)g_host_tx_buf, (uint16_t)n);
         return 0;
     }
 
@@ -757,7 +757,7 @@ uint8_t HostCmd_Parse(const uint8_t *buf, uint16_t len, Aimotor_Cmd_t *cmd)
     if (pos < AIMOTOR_POSITION_MIN || pos > AIMOTOR_POSITION_MAX) {
         int n = snprintf(g_host_tx_buf, sizeof(g_host_tx_buf),
                          "ERR POSITION OUT OF RANGE\r\n");
-        HAL_UART_Transmit(&huart1, (uint8_t *)g_host_tx_buf, n, 100);
+        Host_ReplyBytes((uint8_t *)g_host_tx_buf, (uint16_t)n);
         return 0;
     }
 
@@ -792,14 +792,14 @@ static void HostCmd_Execute(const Aimotor_Cmd_t *cmd)
         CtrlSeqStart(CTRL_SEQ_STOP, 0, 0, 0);
         n = snprintf(g_host_tx_buf, sizeof(g_host_tx_buf),
                      "OK STOP: ACCEPTED\r\n");
-        HAL_UART_Transmit(&huart1, (uint8_t *)g_host_tx_buf, n, 100);
+        Host_ReplyBytes((uint8_t *)g_host_tx_buf, (uint16_t)n);
         break;
 
     case AIMOTOR_CMD_TEST:
         /* 旧 B TEST 会绕过统一控制序列直接 Servo On，永久关闭该危险入口。 */
         n = snprintf(g_host_tx_buf, sizeof(g_host_tx_buf),
                      "ERR B TEST DISABLED: use binary ENABLE\r\n");
-        HAL_UART_Transmit(&huart1, (uint8_t *)g_host_tx_buf, n, 100);
+        Host_ReplyBytes((uint8_t *)g_host_tx_buf, (uint16_t)n);
         break;
 
     case AIMOTOR_CMD_ENABLE:
@@ -808,7 +808,7 @@ static void HostCmd_Execute(const Aimotor_Cmd_t *cmd)
            ALL ENABLE（异步序列 + 回包确认）完成使能。 */
         n = snprintf(g_host_tx_buf, sizeof(g_host_tx_buf),
                      "ERR: single-axis EN disabled, use ALL ENABLE\r\n");
-        HAL_UART_Transmit(&huart1, (uint8_t *)g_host_tx_buf, n, 100);
+        Host_ReplyBytes((uint8_t *)g_host_tx_buf, (uint16_t)n);
         break;
 
     case AIMOTOR_CMD_QUERY:
@@ -818,7 +818,7 @@ static void HostCmd_Execute(const Aimotor_Cmd_t *cmd)
                      "POS B%d M%d %ld\r\n",
                      b + 1, m + 1,
                      (long)aimotor_motors[b][m].actual_position);
-        HAL_UART_Transmit(&huart1, (uint8_t *)g_host_tx_buf, n, 100);
+        Host_ReplyBytes((uint8_t *)g_host_tx_buf, (uint16_t)n);
         break;
 
     case AIMOTOR_CMD_GO:
@@ -826,7 +826,7 @@ static void HostCmd_Execute(const Aimotor_Cmd_t *cmd)
         if (g_control_state != CONTROL_ENABLED) {
             n = snprintf(g_host_tx_buf, sizeof(g_host_tx_buf),
                          "ERR CONTROL DENIED\r\n");
-            HAL_UART_Transmit(&huart1, (uint8_t *)g_host_tx_buf, n, 100);
+            Host_ReplyBytes((uint8_t *)g_host_tx_buf, (uint16_t)n);
             break;
         }
         b = cmd->bus_idx;
@@ -834,7 +834,7 @@ static void HostCmd_Execute(const Aimotor_Cmd_t *cmd)
         if (aimotor_motors[b][m].fault) {
             n = snprintf(g_host_tx_buf, sizeof(g_host_tx_buf),
                          "ERR AXIS FAULT: STOP THEN ENABLE\r\n");
-            HAL_UART_Transmit(&huart1, (uint8_t *)g_host_tx_buf, n, 100);
+            Host_ReplyBytes((uint8_t *)g_host_tx_buf, (uint16_t)n);
             break;
         }
         /* 统一交给生产状态机 STOP→WRITE→TRIGGER→QUERY，等待并校验每个回包；
@@ -842,11 +842,11 @@ static void HostCmd_Execute(const Aimotor_Cmd_t *cmd)
         aimotor_motors[b][m].cmd_pending = 1;
         n = snprintf(g_host_tx_buf, sizeof(g_host_tx_buf),
                      "OK B%d M%d GO: ACCEPTED\r\n", b + 1, m + 1);
-        HAL_UART_Transmit(&huart1, (uint8_t *)g_host_tx_buf, n, 100);
+        Host_ReplyBytes((uint8_t *)g_host_tx_buf, (uint16_t)n);
 #else
         n = snprintf(g_host_tx_buf, sizeof(g_host_tx_buf),
                      "ERR TEXT MOTION DISABLED\r\n");
-        HAL_UART_Transmit(&huart1, (uint8_t *)g_host_tx_buf, n, 100);
+        Host_ReplyBytes((uint8_t *)g_host_tx_buf, (uint16_t)n);
 #endif
         break;
 
@@ -855,7 +855,7 @@ static void HostCmd_Execute(const Aimotor_Cmd_t *cmd)
         if (g_control_state != CONTROL_ENABLED) {
             n = snprintf(g_host_tx_buf, sizeof(g_host_tx_buf),
                          "ERR CONTROL DENIED\r\n");
-            HAL_UART_Transmit(&huart1, (uint8_t *)g_host_tx_buf, n, 100);
+            Host_ReplyBytes((uint8_t *)g_host_tx_buf, (uint16_t)n);
             break;
         }
         b = cmd->bus_idx;
@@ -863,18 +863,18 @@ static void HostCmd_Execute(const Aimotor_Cmd_t *cmd)
         if (aimotor_motors[b][m].fault) {
             n = snprintf(g_host_tx_buf, sizeof(g_host_tx_buf),
                          "ERR AXIS FAULT: STOP THEN ENABLE\r\n");
-            HAL_UART_Transmit(&huart1, (uint8_t *)g_host_tx_buf, n, 100);
+            Host_ReplyBytes((uint8_t *)g_host_tx_buf, (uint16_t)n);
             break;
         }
         aimotor_motors[b][m].target_position = 0;
         aimotor_motors[b][m].cmd_pending = 1;
         n = snprintf(g_host_tx_buf, sizeof(g_host_tx_buf),
                      "OK B%d M%d HOME\r\n", b + 1, m + 1);
-        HAL_UART_Transmit(&huart1, (uint8_t *)g_host_tx_buf, n, 100);
+        Host_ReplyBytes((uint8_t *)g_host_tx_buf, (uint16_t)n);
 #else
         n = snprintf(g_host_tx_buf, sizeof(g_host_tx_buf),
                      "ERR TEXT MOTION DISABLED\r\n");
-        HAL_UART_Transmit(&huart1, (uint8_t *)g_host_tx_buf, n, 100);
+        Host_ReplyBytes((uint8_t *)g_host_tx_buf, (uint16_t)n);
 #endif
         break;
 
@@ -883,7 +883,7 @@ static void HostCmd_Execute(const Aimotor_Cmd_t *cmd)
         if (g_control_state != CONTROL_ENABLED) {
             n = snprintf(g_host_tx_buf, sizeof(g_host_tx_buf),
                          "ERR CONTROL DENIED\r\n");
-            HAL_UART_Transmit(&huart1, (uint8_t *)g_host_tx_buf, n, 100);
+            Host_ReplyBytes((uint8_t *)g_host_tx_buf, (uint16_t)n);
             break;
         }
         b = cmd->bus_idx;
@@ -891,7 +891,7 @@ static void HostCmd_Execute(const Aimotor_Cmd_t *cmd)
         if (aimotor_motors[b][m].fault) {
             n = snprintf(g_host_tx_buf, sizeof(g_host_tx_buf),
                          "ERR AXIS FAULT: STOP THEN ENABLE\r\n");
-            HAL_UART_Transmit(&huart1, (uint8_t *)g_host_tx_buf, n, 100);
+            Host_ReplyBytes((uint8_t *)g_host_tx_buf, (uint16_t)n);
             break;
         }
         aimotor_motors[b][m].target_position = cmd->position;
@@ -899,11 +899,11 @@ static void HostCmd_Execute(const Aimotor_Cmd_t *cmd)
         n = snprintf(g_host_tx_buf, sizeof(g_host_tx_buf),
                      "OK B%d M%d P%ld: ACCEPTED\r\n",
                      b + 1, m + 1, (long)cmd->position);
-        HAL_UART_Transmit(&huart1, (uint8_t *)g_host_tx_buf, n, 100);
+        Host_ReplyBytes((uint8_t *)g_host_tx_buf, (uint16_t)n);
 #else
         n = snprintf(g_host_tx_buf, sizeof(g_host_tx_buf),
                      "ERR TEXT MOTION DISABLED\r\n");
-        HAL_UART_Transmit(&huart1, (uint8_t *)g_host_tx_buf, n, 100);
+        Host_ReplyBytes((uint8_t *)g_host_tx_buf, (uint16_t)n);
 #endif
         break;
 
@@ -911,7 +911,7 @@ static void HostCmd_Execute(const Aimotor_Cmd_t *cmd)
         if (Aimotor_CtrlSeqActive()) {
             n = snprintf(g_host_tx_buf, sizeof(g_host_tx_buf),
                          "ERR CONTROL BUSY\r\n");
-            HAL_UART_Transmit(&huart1, (uint8_t *)g_host_tx_buf, n, 100);
+            Host_ReplyBytes((uint8_t *)g_host_tx_buf, (uint16_t)n);
             break;
         }
         if (g_control_state == CONTROL_ENABLED) {
@@ -922,32 +922,32 @@ static void HostCmd_Execute(const Aimotor_Cmd_t *cmd)
                 n = snprintf(g_host_tx_buf, sizeof(g_host_tx_buf),
                              "OK ALL ENABLE: ALREADY ENABLED\r\n");
             }
-            HAL_UART_Transmit(&huart1, (uint8_t *)g_host_tx_buf, n, 100);
+            Host_ReplyBytes((uint8_t *)g_host_tx_buf, (uint16_t)n);
             break;
         }
         if ((g_control_faults & CONTROL_FAULT_INTERNAL) != 0U) {
             n = snprintf(g_host_tx_buf, sizeof(g_host_tx_buf),
                          "ERR CONTROL FAULT\r\n");
-            HAL_UART_Transmit(&huart1, (uint8_t *)g_host_tx_buf, n, 100);
+            Host_ReplyBytes((uint8_t *)g_host_tx_buf, (uint16_t)n);
             break;
         }
         CtrlSeqStart(CTRL_SEQ_ENABLE, 0, 0, 0);
         n = snprintf(g_host_tx_buf, sizeof(g_host_tx_buf),
                      "OK ALL ENABLE: ACCEPTED\r\n");
-        HAL_UART_Transmit(&huart1, (uint8_t *)g_host_tx_buf, n, 100);
+        Host_ReplyBytes((uint8_t *)g_host_tx_buf, (uint16_t)n);
         break;
 
     case AIMOTOR_CMD_DISABLE_ALL:
         if (Aimotor_CtrlSeqActive()) {
             n = snprintf(g_host_tx_buf, sizeof(g_host_tx_buf),
                          "ERR CONTROL BUSY\r\n");
-            HAL_UART_Transmit(&huart1, (uint8_t *)g_host_tx_buf, n, 100);
+            Host_ReplyBytes((uint8_t *)g_host_tx_buf, (uint16_t)n);
             break;
         }
         CtrlSeqStart(CTRL_SEQ_DISABLE, 0, 0, 0);
         n = snprintf(g_host_tx_buf, sizeof(g_host_tx_buf),
                      "OK ALL DISABLE: ACCEPTED\r\n");
-        HAL_UART_Transmit(&huart1, (uint8_t *)g_host_tx_buf, n, 100);
+        Host_ReplyBytes((uint8_t *)g_host_tx_buf, (uint16_t)n);
         break;
 
     case AIMOTOR_CMD_NONE:
@@ -966,5 +966,28 @@ void Host_ProtocolInit(void)
     HAL_UARTEx_ReceiveToIdle_DMA(&huart1, g_host_dma_buf, sizeof(g_host_dma_buf));
     __HAL_DMA_DISABLE_IT(huart1.hdmarx, DMA_IT_HT);
 }
+
+/* 上位机回复等待上限：STATE 帧 70 字节 @115200 约 6ms，20ms 覆盖两帧排队 */
+#define HOST_TX_WAIT_MS 20
+
+/* 非阻塞回复发送（USART1 中断方式）：上一帧未发完时有界等待，异常时退化为
+   阻塞发送。所有上位机回复（ACK/STATE/文本）统一走此通道，5ms 调度循环
+   不再被 STATE 帧的 ~6ms 阻塞发送拖住。仅在主循环上下文调用。 */
+void Host_ReplyBytes(const uint8_t *data, uint16_t len)
+{
+    if (data == NULL || len == 0U) {
+        return;
+    }
+    uint32_t start = HAL_GetTick();
+    while (huart1.gState != HAL_UART_STATE_READY) {
+        if ((HAL_GetTick() - start) >= HOST_TX_WAIT_MS) {
+            break;
+        }
+    }
+    if (HAL_UART_Transmit_IT(&huart1, (uint8_t *)data, len) != HAL_OK) {
+        (void)HAL_UART_Transmit(&huart1, (uint8_t *)data, len, 100);
+    }
+}
+
 
 /* USER CODE END 0 */
