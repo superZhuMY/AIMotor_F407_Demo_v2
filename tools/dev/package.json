@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "tree-sitter-c": "^0.24.1",
+    "web-tree-sitter": "^0.26.13"
+  }
+}

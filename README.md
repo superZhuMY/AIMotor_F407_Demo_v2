@@ -25,6 +25,7 @@ AIMotor_F407_Demo/
 ├── docs/                    # 架构 / 协议 / 驱动 / 返修记录
 └── tools/
     ├── protocol_test.py     # 主机端协议回归测试（python3 tools/protocol_test.py）
+    ├── dev/                 # Windows 环境说明 + 本地自检脚本（无需编译器，见 tools/dev/README.md）
     └── host_reference/      # 旧"PC 直驱电机"架构的上位机参考代码（已归档）
 ```
 

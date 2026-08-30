@@ -9,6 +9,7 @@ MDK-ARM/*.uvguix.*
 # 编辑器 / 工具会话
 .vscode/
 .zcode/
+tools/dev/node_modules/
 
 # 系统文件
 Thumbs.db
