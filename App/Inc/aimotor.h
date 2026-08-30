@@ -87,7 +87,10 @@ extern "C" {
 #define HOST_TEXT_LINE_TIMEOUT_MS   50U   /* 无 \n 的文本行冲刷超时 */
 #define HOST_COMM_WATCHDOG_MS       250U  /* 主机通信看门狗 */
 
-/* 控制状态机 */
+/**
+ * @brief 控制状态机：DISABLED 上电默认（拒 TARGET）/ ENABLED 允许运动 /
+ *        STOPPED 停止后需显式 ENABLE / FAULT 故障锁定
+ */
 typedef enum {
     CONTROL_DISABLED = 0,   /* 上电默认；拒绝 TARGET */
     CONTROL_ENABLED,        /* 允许 TARGET */
@@ -95,7 +98,7 @@ typedef enum {
     CONTROL_FAULT
 } ControlState_t;
 
-/* 控制级故障标志（组合位） */
+/** @brief 控制级故障标志（组合位，经 STATE 帧 fault 字节上报） */
 #define CONTROL_FAULT_NONE          0x00U
 #define CONTROL_FAULT_COMM_TIMEOUT  0x01U
 #define CONTROL_FAULT_RX_OVERFLOW   0x02U
@@ -107,7 +110,7 @@ typedef enum {
 #define AIMOTOR_ACK_CTRL_BUSY       0x09   /* 控制序列进行中，命令被拒绝 */
 #define AIMOTOR_ACK_CTRL_FAILED     0x0A   /* 控制命令部分/全部电机失败 */
 
-/* ── 控制序列（异步执行 ENABLE/STOP/DISABLE/上电安全停止） ────────── */
+/** @brief 异步控制序列种类（步骤表见 aimotor_internal.h） */
 #define CTRL_RETRY_MAX              3      /* 控制序列单电机重试上限 */
 typedef enum {
     CTRL_SEQ_NONE = 0,
@@ -118,7 +121,7 @@ typedef enum {
     CTRL_SEQ_ROLLBACK             /* ENABLE 失败：全 12 轴安全回滚 */
 } CtrlSeqKind_t;
 
-/* 命令分发结果（决定是否刷新通信看门狗） */
+/** @brief 二进制帧分发结果（决定是否刷新通信看门狗） */
 typedef enum {
     FRAME_REJECTED = 0,               /* 未接受：不刷新 */
     FRAME_ACCEPTED_NO_WATCHDOG,       /* 已接受但不刷新（HELLO 固定不刷新） */
@@ -128,7 +131,7 @@ typedef enum {
 /* 12 轴轴序位图（side*6 + joint，bit0..5=L_J1..L_J6，bit6..11=R_J1..R_J6） */
 #define AIMOTOR_AXIS_BIT(side, joint) ((uint16_t)(1U << ((side) * 6U + (joint))))
 
-/* ── 电机状态机步骤 ──────────────────────────────────────────── */
+/** @brief 单电机运动事务步骤：STOP→WRITE→TRIGGER→QUERY→WAIT_*→IDLE */
 typedef enum {
     MOTOR_STEP_IDLE    = 0,   // 空闲（无命令可执行）
     MOTOR_STEP_STOP    = 1,   // 发送停止 (10H -> 0x0305=0)
@@ -145,7 +148,7 @@ typedef enum {
     MOTOR_STEP_FAULT = 12,
 } Aimotor_Step_t;
 
-/* ── 上位机命令类型 ──────────────────────────────────────────── */
+/** @brief 上位机文本命令类型（B/ALL 前缀） */
 typedef enum {
     AIMOTOR_CMD_NONE = 0,
     AIMOTOR_CMD_MOVE,
@@ -164,7 +167,12 @@ typedef enum {
 
 /* USER CODE BEGIN Prototypes */
 
-/* ── 单个电机数据结构 ────────────────────────────────────────── */
+/**
+ * @brief 单个 AI 电机的运行状态与私有回包缓冲
+ *
+ * rx_buf/rx_ready 由 DMA 回调按从站号路由填充，避免同总线多电机回包互相覆盖；
+ * enabled 只反映"回包确认后"的实际使能状态。
+ */
 typedef struct {
     uint8_t  slave_id;          // 电机站号 (1/2/3)
     int32_t  target_position;   // 目标位置(脉冲)
@@ -185,7 +193,7 @@ typedef struct {
     uint8_t  actual_valid;      // actual_position 来自最近成功回读
 } Aimotor_t;
 
-/* ── 单路 RS485 总线数据结构 ─────────────────────────────────── */
+/** @brief 单路 RS485 总线的收发资源：UART 句柄、TX LED、DMA 缓冲 */
 typedef struct {
     UART_HandleTypeDef *huart;  // USART 句柄
     GPIO_TypeDef       *led_port; // TX LED 端口
@@ -201,7 +209,7 @@ typedef struct {
 extern Aimotor_Bus_t aimotor_buses[AIMOTOR_BUS_COUNT];
 extern Aimotor_t     aimotor_motors[AIMOTOR_BUS_COUNT][AIMOTOR_MOTORS_PER];
 
-/* ── 电机命令结构体（上位机解析结果） ──────────────────────────── */
+/** @brief 上位机文本命令的解析结果 */
 typedef struct {
     Aimotor_CmdType_t type;
     uint8_t  bus_idx;      // 总线号 0~3
@@ -211,20 +219,58 @@ typedef struct {
 } Aimotor_Cmd_t;
 
 /* ── API 函数声明 ───────────────────────────────────────────── */
+/**
+ * @brief  初始化 AI 电机系统：配置总线 GPIO/LED、清零电机参数、启动各总线
+ *         DMA 空闲接收，并启动上电安全停止序列（12 轴 Servo Off / 0x80）
+ * @note   在 Host_ProtocolInit() 之后、主循环之前调用一次
+ */
 void Aimotor_Init(void);
+
+/**
+ * @brief  AI 电机 5ms tick 处理：控制序列推进、B/ALL 文本命令消费、
+ *         单电机状态机轮转（每 tick 每总线至多一个事务，半双工一次一帧）
+ * @note   主循环按 AIMOTOR_TICK_MS 周期调用；内含控制序列独占总线的暂停逻辑
+ */
 void Aimotor_Process(void);
+
+/**
+ * @brief  AI 总线 DMA 空闲回包路由（ISR 上下文调用）
+ *         按从站号把回包拷入对应电机私有缓冲，并重启本总线 DMA 接收
+ * @param  huart 触发回调的 UART 句柄（USART2/USART3）
+ * @param  Size  本次 DMA 收到的字节数
+ */
 void Aimotor_RxCallback(UART_HandleTypeDef *huart, uint16_t Size);
+
+/**
+ * @brief  AI 总线接收故障恢复：中止接收、清错误标志、重启 DMA 空闲接收
+ * @note   由 comm_router.c 的 UART 错误回调调用
+ */
 void Aimotor_RecoverRx(UART_HandleTypeDef *huart);
 
-/* 上位机流解析（拆包/粘包/CRC 重同步），主循环每 5ms 调用 */
+/**
+ * @brief  上位机字节流解析（主循环调用，实现在 host_protocol.c）
+ *         拆包/粘包、CRC 校验与重同步、二进制帧分发、文本行提取与提交；
+ *         解析有迭代上限，绝不阻塞主循环
+ */
 void Aimotor_HostStreamPoll(void);
-/* 上位机 DMA 接收追加（ISR 调用，仅字节拷贝） */
+
+/**
+ * @brief  上位机 DMA 接收字节追加（ISR 上下文调用，仅拷贝入环形缓冲）
+ * @param  data 本次收到的字节
+ * @param  len  字节数；环形缓冲满时置 RX_OVERFLOW 故障位，不覆盖未解析数据
+ */
 void Aimotor_HostRxAppend(const uint8_t *data, uint16_t len);
-/* 通信看门狗（主循环调用，无阻塞） */
+
+/**
+ * @brief  主机通信看门狗：ENABLED 下 250ms 无有效命令 → 清全部待执行目标、
+ *         置 STOPPED 并启动全局停止序列；需重新 ENABLE 才能恢复运动
+ */
 void Aimotor_CommWatchdog(void);
-/* 有效二进制帧刷新看门狗时间戳（仅 FRAME_ACCEPTED_REFRESH_WATCHDOG 时调用） */
+
+/** @brief 刷新看门狗时间戳（仅被接受且需刷新的二进制命令/序列成功完成时） */
 void Aimotor_RefreshHostWatchdog(void);
-/* 控制状态查询 */
+
+/** @brief 查询当前控制状态（DISABLED/ENABLED/STOPPED/FAULT） */
 ControlState_t Aimotor_GetControlState(void);
 
 /* ── DRY_RUN 干跑模式（mock 记录待发送命令，真实发送函数调用次数恒为 0） ── */
@@ -239,28 +285,84 @@ extern volatile uint32_t g_dry_run_ai_tx_count;   /* 真实 AI 发送计数（DR
 extern volatile uint32_t g_dry_run_mw_tx_count;   /* 真实 MW 发送计数（DRY_RUN 下恒为 0） */
 extern volatile DryRunLogEntry_t g_dry_run_log[AIMOTOR_DRY_RUN_LOG_MAX];
 extern volatile uint8_t  g_dry_run_log_index;     /* 环形写指针 */
+/**
+ * @brief  记录一条"将发送"的命令帧到 DRY_RUN mock 日志（环形覆盖）
+ * @param  is_mw 0=AI 总线帧，1=MW 总线帧
+ * @param  data  待记录的命令帧
+ * @param  len   帧长（超长截断到 AIMOTOR_DRY_RUN_FRAME_MAX）
+ * @note   仅 AIMOTOR_DRY_RUN=1 时由发送层调用；真实发送计数恒为 0
+ */
 void Aimotor_DryRunLog(uint8_t is_mw, const uint8_t *data, uint16_t len);
 
 /* 安全控制接口（异步控制序列，非阻塞；ACK 在序列完成后回发） */
-uint8_t Aimotor_CtrlSeqActive(void);     /* 控制序列是否进行中 */
-void Aimotor_ControlStopStart(void);     /* 文本 STOP：异步全局安全停止 12 轴 */
 
-/* 自检入口（AIMOTOR_SELF_TEST=1 时由 main 调用，直接覆盖生产 C 函数） */
+/**
+ * @brief  控制序列（ENABLE/STOP/DISABLE/回滚）是否正在进行
+ * @retval 1 进行中：运动命令与新序列被拒绝/排队
+ */
+uint8_t Aimotor_CtrlSeqActive(void);
+
+/**
+ * @brief  发起异步全局安全停止（12 轴 0x0305=0 / 0x80，逐台回包确认）
+ * @note   文本 STOP/L STOP/R STOP 入口；可抢占 ENABLE/DISABLE/回滚序列
+ */
+void Aimotor_ControlStopStart(void);
+
+/* 自检入口（AIMOTOR_SELF_TEST=1 时由 main 调用，实现在 aimotor_selftest.c） */
+
+/**
+ * @brief  固件自检：解析器/看门狗/电机安全/换算与 STATE/DRY_RUN 五组约 60 项
+ * @note   仅 AIMOTOR_SELF_TEST=1（强制 DRY_RUN=1）时编译；结果经 USART1 输出
+ */
 void Aimotor_SelfTest(void);
 
-/* Modbus 协议函数（参数化 bus_idx） */
+/* Modbus 协议函数（参数化 bus_idx；定义见 aimotor_modbus.c） */
+
+/** @brief Modbus RTU CRC16（poly 0xA001，初值 0xFFFF） */
 uint16_t Aimotor_CRC16(const uint8_t *buf, uint16_t len);
+
+/**
+ * @brief  经总线发送 tx_buf 前 len 字节（TX LED 闪烁、等待发送完成）
+ * @note   AIMOTOR_DRY_RUN=1 时改为 mock 记录，不做真实发送
+ */
 void     Aimotor_BusSendBytes(uint8_t bus_idx, uint16_t len);
+
+/** @brief 伺服使能：06H 写 H03_03=1 */
 void     Aimotor_ServoOn(uint8_t bus_idx, uint8_t slave_id);
-void     Aimotor_ServoOff(uint8_t bus_idx, uint8_t slave_id); /* 写 0x0303=0，与 ServoOn 同寄存器逆值 */
+
+/** @brief 伺服断开：06H 写 H03_03=0（与 ServoOn 同寄存器逆值） */
+void     Aimotor_ServoOff(uint8_t bus_idx, uint8_t slave_id);
+
+/** @brief 停止多段位运行：10H 写 H03_05=0 */
 void     Aimotor_StopMotion(uint8_t bus_idx, uint8_t slave_id);
+
+/**
+ * @brief  写目标位置：10H 写 H11_12（Int32，CDAB 字节序）
+ * @param  bus_idx 总线索引 0/1
+ * @param  slave_id 从站号 1/2/3
+ * @param  pulse 目标位置（脉冲），越界直接丢弃不发送
+ */
 void     Aimotor_SendPosition(uint8_t bus_idx, uint8_t slave_id,
                               int32_t pulse);
+
+/** @brief 触发运行：10H 写 H03_05=1 */
 void     Aimotor_TriggerMotion(uint8_t bus_idx, uint8_t slave_id);
+
+/** @brief 查询实际位置：03H 读 H0B_07（2 寄存器，Int32 CDAB） */
 void     Aimotor_QueryPosition(uint8_t bus_idx, uint8_t slave_id);
+
+/** @brief 查询位置偏差：03H 读 H0B_15（编码器偏差计数，到位判断用） */
 void     Aimotor_QueryPositionError(uint8_t bus_idx, uint8_t slave_id);
 
-/* 上位机命令解析 */
+/* 上位机命令解析（定义见 host_protocol.c） */
+
+/**
+ * @brief  解析 B/ALL 文本命令（B1 M1 P10000 S300 / B1 STOP / ALL STOP 等）
+ * @param  buf 命令文本（不含行结束符）
+ * @param  len 文本长度
+ * @param  cmd [out] 解析结果
+ * @retval 1 有效命令；0 无效（部分格式错误经 USART1 回 ERR 提示）
+ */
 uint8_t  HostCmd_Parse(const uint8_t *buf, uint16_t len, Aimotor_Cmd_t *cmd);
 
 /* USER CODE END Prototypes */

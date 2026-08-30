@@ -12,6 +12,7 @@ MDK-ARM/*.uvguix.*
 .vscode/
 .zcode/
 tools/dev/node_modules/
+docs/api_html/
 
 # 系统文件
 Thumbs.db

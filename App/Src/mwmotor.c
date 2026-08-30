@@ -253,7 +253,7 @@ static void ProcessRx(uint8_t bus_idx, uint8_t motor_idx)
 /*                       上位机命令解析与执行 (L/R prefix)                   */
 /* ======================================================================== */
 
-/**
+/*
   * 格式:
   *   L J5 <deg> J6 <deg> S <speed>   — 左臂 J5/J6 角度, 速度
   *   R J5 <deg> J6 <deg> S <speed>   — 右臂 J5/J6 角度, 速度

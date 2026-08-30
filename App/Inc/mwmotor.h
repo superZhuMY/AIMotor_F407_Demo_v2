@@ -135,41 +135,102 @@ typedef struct {
 } MW_Cmd_t;
 
 /* ── API ─────────────────────────────────────────────────────── */
+/**
+ * @brief  初始化 MW 电机系统：总线映射（USART6=左/UART5=右）、电机参数、
+ *         启动 DMA 空闲接收、复位空闲轮询节拍
+ * @note   在 Aimotor_Init() 之后调用；电机上电默认运行态，无需 0x88 使能
+ */
 void MW_Init(void);
+
+/**
+ * @brief  MW 电机 5ms tick 处理：L/R 文本命令消费、J4 独立轴状态机、
+ *         J5/J6 耦合事务（写 M5→写 M6→读 M5→读 M6）、空闲轮询调度
+ * @note   控制序列进行时暂停状态机，由序列独占总线
+ */
 void MW_Process(void);
+
+/**
+ * @brief  MW 总线 DMA 空闲回包接收（ISR 上下文调用）：记录长度并重启 DMA
+ * @param  huart 触发回调的 UART 句柄（USART6/UART5）
+ * @param  Size  本次 DMA 收到的字节数
+ */
 void MW_RxCallback(UART_HandleTypeDef *huart, uint16_t Size);
+
+/**
+ * @brief  MW 总线接收故障恢复：中止接收、清错误标志、重启 DMA 空闲接收
+ * @note   由 comm_router.c 的 UART 错误回调调用
+ */
 void MW_RecoverRx(UART_HandleTypeDef *huart);
-/* 校验 MW 应答帧（0x88/0x80/0xA3/0x92 共用），供控制序列应答确认使用 */
+
+/**
+ * @brief  校验 MW 应答帧（0x88/0x80/0xA3/0x92 共用）
+ *         帧头/ID/CMD/和校验/长度全查，不修改任何状态
+ * @retval 1 应答合法；0 非法或不匹配
+ */
 uint8_t MW_ReplyOk(uint8_t bus_idx, uint8_t id, uint8_t cmd);
-/* 重置空闲读取事务 owner（STOP/DISABLE/新事务开始） */
+
+/** @brief 重置空闲读取事务 owner（STOP/DISABLE/新事务开始时调用） */
 void MW_IdlePollReset(uint8_t side);
-/* 冻结/恢复空闲位置轮询（自检用）：freeze=1 时暂停该总线空闲读 */
+
+/**
+ * @brief  冻结/恢复空闲位置轮询（自检用）：freeze=1 暂停该总线空闲读，
+ *         防止空闲读干扰重试耗尽等确定性测试
+ */
 void MW_IdlePollSet(uint8_t side, uint8_t freeze);
-/* 统一关节换算（文本/二进制共用，唯一基准，含范围检查）。
-   输入为 deg×1000（1000 计数/度）；返回 0=成功，1=超范围/非法参数。
-   m4/m5/m6 为电机侧目标（计数），已含右臂取反与 J5/J6 耦合。 */
+/**
+ * @brief  统一关节→电机换算（文本/二进制共用，唯一基准，含范围检查）
+ *         M5 = J5×5/3（右臂取反）；M6 = J6×20/9 − M5
+ * @param  side 0=左臂 1=右臂
+ * @param  j4_deg1000 J4 关节角（deg×1000）
+ * @param  j5_deg1000 J5 关节角（deg×1000）
+ * @param  j6_deg1000 J6 关节角（deg×1000）
+ * @param  m4 [out] J4 电机目标（计数）
+ * @param  m5 [out] J5 电机目标（计数，含 5/3 与取反）
+ * @param  m6 [out] J6 电机目标（计数，含 20/9 与耦合）
+ * @retval 0 成功；1 超范围/非法参数
+ */
 uint8_t MW_ForwardKin(uint8_t side, int64_t j4_deg1000, int64_t j5_deg1000,
                       int64_t j6_deg1000, int64_t *m4, int64_t *m5, int64_t *m6);
-/* 将已验证的换算结果写入电机状态（J4 独立 + J5/J6 耦合 pending） */
+
+/** @brief 将已验证的换算结果写入电机状态（J4 独立 + J5/J6 耦合 pending） */
 void MW_ApplyTargets(uint8_t side, int64_t j4_deg1000, int64_t j5_deg1000,
                      int64_t j6_deg1000, int64_t m4, int64_t m5, int64_t m6);
-/* 二进制 TARGET 的 MW 侧换算+范围检查（不写状态，供原子校验） */
+
+/**
+ * @brief  二进制 TARGET 的 MW 侧换算 + 范围检查（µrad → deg×1000 → ForwardKin）
+ * @retval 0 成功；非 0 越界/非法。不写任何电机状态（供 TARGET 原子校验）
+ */
 uint8_t MW_BinaryConvert(uint8_t side, const int32_t joint_urad[6],
                          int64_t *m4, int64_t *m5, int64_t *m6,
                          int64_t *j4_deg1000, int64_t *j5_deg1000,
                          int64_t *j6_deg1000);
-/* 电机实际角度 → 关节侧 µrad（STATE 反馈用，与 MW_ForwardKin 互为逆运算） */
+
+/** @brief 电机实际角度 → 关节侧 µrad（STATE 反馈用，与 MW_ForwardKin 互逆） */
 void MW_ReadbackUrad(uint8_t side, int64_t *j4_urad, int64_t *j5_urad,
                      int64_t *j6_urad);
+
+/** @brief 结构化 MW 命令入口（预留接口，当前文本路径未使用） */
 void MW_HostCmd(const MW_Cmd_t *cmd);
 
-/* 协议函数 */
+/* 协议函数（定义见 mwmotor.c；DRY_RUN=1 时发送层改为 mock 记录） */
+
+/** @brief 0x3E 帧校验和：字节累加取低 8 位 */
 uint8_t MW_Checksum(const uint8_t *buf, uint16_t len);
+
+/** @brief 经总线发送 tx_buf 前 len 字节（TX LED 闪烁、等待发送完成） */
 void    MW_SendBytes(uint8_t bus_idx, uint16_t len);
+
+/** @brief 0xA3 多圈位置控制（int64 角度小端 8 字节，电机侧计数制） */
 void    MW_SendA3(uint8_t bus_idx, uint8_t id, int64_t angle);
+
+/** @brief 0x92 读取多圈角度 */
 void    MW_Send92(uint8_t bus_idx, uint8_t id);
-void    MW_Send80(uint8_t bus_idx, uint8_t id);  // 关闭
-void    MW_Send88(uint8_t bus_idx, uint8_t id);  // 运行
+
+/** @brief 0x80 电机关闭 */
+void    MW_Send80(uint8_t bus_idx, uint8_t id);
+
+/** @brief 0x88 电机运行（使能） */
+void    MW_Send88(uint8_t bus_idx, uint8_t id);
 
 /* USER CODE END Prototypes */
 

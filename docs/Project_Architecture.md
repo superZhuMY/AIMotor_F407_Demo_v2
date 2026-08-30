@@ -262,12 +262,79 @@ MW_Process():
 | **06H vs 10H 功能码** | 伺服使能(0x0303)用 06H 可用，但启停(0x0305)和位置(0x110C)必须用 10H，与 CPP 参考代码一致 |
 | **模块分离** | AI 电机(Modbus)和 MW 电机(私有协议)各自独立模块，数据结构、状态机、协议函数完全隔离 |
 | **ROUND_ROBIN 调度** | 每条总线每次 tick 只处理一个电机，避免半双工 RS485 冲突。3 tick 轮完一圈 |
+| **五模块拆分** | aimotor.c 按职责拆为电机核心/Modbus 编解码/控制序列/上位机协议/自检五个文件，公共 API 不变；跨文件内部符号收敛在 aimotor_internal.h |
+| **非阻塞回复通道** | 上位机回复（ACK/STATE/文本）统一走 Host_ReplyBytes 中断发送，5ms 调度循环不再被 70 字节 STATE 帧 ~6ms 的阻塞发送拖住 |
+| **环形缓冲流解析** | USART1 的 ISR 只做字节追加，拆包/粘包/CRC 重同步全部在主循环完成；解析有迭代上限，绝不阻塞 |
 
 ## 7. 待完善项
 
-- [ ] MW 电机 J4 独立关节角度命令
-- [ ] 串口屏显示模块（UART4, PA0/PA1）
-- [ ] 运动到达自动上报
-- [ ] 上位机连接超时自动急停
-- [ ] Phase 2：扩展 USART6/UART5 为 MW 左右臂总线
-- [ ] 错误状态上报（电压、温度、堵转等）
+- [x] MW 电机 J4 独立关节角度命令（L J4 HOME / L J4 <角度> 已支持）
+- [x] 上位机连接超时自动急停（250ms 通信看门狗，v1.3）
+- [x] Phase 2：12 轴（2 臂 × 6 关节）全部接入并经 STATE 帧上报
+- [ ] 开启到位判断：AIMOTOR_ENABLE_ARRIVAL_CHECK / MW_ENABLE_ARRIVAL_CHECK 由 0 改 1 并现场标定容差
+- [ ] 串口屏显示模块（UART4, PA0/PA1；与遥控接收机用途二选一）
+- [ ] 运动到达自动上报 / 周期 STATE 主动流（协议 VERSION 升版）
+- [ ] 错误状态上报（电压、温度、堵转等，经驱动器状态寄存器读入 STATE 帧）
+- [ ] 上位机正式 ROS 节点：消费 STATE 关节侧 µm/µrad，删除旧节点的 LINEAR_FACTORS 二次换算（参考 tools/host_reference/）
+- [ ] 提高总线波特率（若驱动器支持，460800/921600——所有事务时间近似等比缩短，杠杆最大）
+
+## 8. 时序与性能预算
+
+线上参数：115200 8N2 ≈ 95.5µs/字节（11 bit）；Modbus RTU 帧间静默 ≈ 0.3ms。
+
+| 路径 | 组成 | 实测量级 |
+|------|------|---------|
+| AI 单次总线事务 | 发 8~13B + 驱动器响应 + 收 8~9B | 3~6ms（大头是驱动器响应时间） |
+| AI 单次运动序列 | STOP→WRITE→TRIGGER→QUERY 共 4 次往返 | 15~25ms，与同总线 2 电机轮转共享 |
+| MW 耦合事务 | 写 M5→写 M6→读 M5→读 M6 共 8 次往返 | 全系统最慢路径 |
+| 空闲轮询 | AI 每电机 ~15ms；MW J4 ~100ms、J5/J6 随耦合事务 | MoveIt 反馈短板在 MW 侧 |
+| ENABLE/STOP 序列 | 12 轴逐台回包确认，每 tick 推进一步 | ~0.5~2s（一次性操作） |
+| 5ms tick 上限 | 每 tick 每总线 1 个事务 | 理论 200 事务/总线/秒 |
+
+**瓶颈结论**：MCU（168MHz，RX 全 DMA）不是瓶颈；瓶颈在半双工应答等待 × 往返次数。
+提升杠杆排序：驱动器波特率 ↑ > 砍运动序列往返（QUERY 交给空闲轮询）> 控制序列按总线并行 > TX 中断化。
+
+## 9. 构建、烧录与验收
+
+### 9.1 编译配置矩阵
+
+| 配置 | AIMOTOR_DRY_RUN | AIMOTOR_SELF_TEST | 用途 |
+|------|-----------------|-------------------|------|
+| 发布 | 0 | 0 | 实机运行 |
+| 干跑 | 1 | 0 | 无硬件验证总线命令序列（mock 日志） |
+| 自检 | 1 | 1 | 上电跑 ~60 项自检（宏在 aimotor.h 带 #ifndef，可由构建配置覆盖） |
+
+### 9.2 步骤
+
+1. Keil 打开 MDK-ARM/AIMotor_F407_Demo.uvprojx，Rebuild（应用代码在 Application/User/App 组）
+2. 自检配置烧录 → USART1 (115200) 查看逐项 PASS/FAIL，预期 0 failed
+3. 换发布配置烧录 → 上位机 USART1 走 HELLO → ENABLE → TARGET → STATE 二进制链路验收
+4. 主机端回归：python tools/protocol_test.py（60 项，需真 Python）
+
+### 9.3 本地无编译器时的快速自检（详见 tools/dev/README.md）
+
+```
+node tools/dev/balance_check.js      # 括号平衡
+node tools/dev/syntax_check.js       # tree-sitter 语法检查（对比 HEAD 基线，只报新错误）
+doxygen docs/Doxyfile                # 代码 API 文档（docs/api_html/index.html）
+```
+
+注意：以上只覆盖语法结构层，查不出隐式声明/重声明等语义错误——**最终以 Keil 编译为准**。
+
+## 10. 文档体系
+
+| 文档 | 内容 | 维护时机 |
+|------|------|---------|
+| 本文件（Project_Architecture.md） | 架构/数据流/状态机/时序/验收 | 每次结构调整 |
+| API_Protocol_v1.0.md | 上位机二进制协议线上字节定义 | 协议变更（升 VERSION） |
+| docs/api_html/（Doxygen 生成） | 代码级 API：全部函数/结构体/宏 | 注释在头文件，随改随生成 |
+| README_J456_DRIVER.md | J4/J5/J6 驱动说明 | 驱动层变更 |
+| docs/MODIFICATION_REPORT_v1.3.md | 变更记录（v1.3 安全返修） | 每次返修追加 |
+| tools/dev/README.md | Windows 环境与本地自检工具 | 环境变化 |
+
+## 11. 已知问题与 FAQ
+
+- **链接错误 L6031U（找不到 .sct）**：散布文件位于构建输出目录但作为固定链接输入，已入库（.gitignore 例外）；新克隆后直接 Rebuild 即可
+- **Keil 控制台中文注释乱码**：GBK 控制台显示 UTF-8 文件，仅显示问题，文件无损
+- **git 提示 LF→CRLF / git log 中文乱码**：autocrlf 自动转换与终端编码显示问题，仓库数据无损（UTF-8）
+- **python 命令无输出退出码 49**：WindowsApps 占位 stub，需安装真 Python（winget install Python.Python.3.12）

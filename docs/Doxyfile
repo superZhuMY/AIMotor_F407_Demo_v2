@@ -1,0 +1,46 @@
+# Doxygen 配置 —— AIMotor_F407_Demo 双机械臂下位机
+# 生成命令（在仓库根目录执行）：
+#   C:\Users\CyberStorm\AppData\Local\Programs\doxygen\doxygen.exe docs\Doxyfile
+# 输出：docs/api_html/index.html（已加入 .gitignore，不随仓库走）
+
+PROJECT_NAME           = "AIMotor_F407_Demo"
+PROJECT_NUMBER         = "v1.3"
+PROJECT_BRIEF          = "双机械臂 12 轴电机下位机（STM32F407VET6）"
+
+#---------------------------------------------------------------------------
+# 输入：手写应用层（App/）+ CubeMX 生成区中与业务相关的 Core 文件
+# 不含 Drivers/（HAL 与 CMSIS 为第三方库，不参与文档）
+#---------------------------------------------------------------------------
+INPUT                  = App Core/Src Core/Inc
+INPUT_ENCODING         = UTF-8
+FILE_PATTERNS          = *.c *.h
+RECURSIVE              = YES
+EXCLUDE                = Core/Src/system_stm32f4xx.c Core/Src/stm32f4xx_hal_msp.c Core/Src/main.c Core/Inc/stm32f4xx_hal_conf.h
+EXCLUDE_PATTERNS       = */node_modules/*
+
+#---------------------------------------------------------------------------
+# 提取与语言
+#---------------------------------------------------------------------------
+OUTPUT_LANGUAGE        = Chinese
+OPTIMIZE_OUTPUT_FOR_C  = YES
+EXTRACT_ALL            = YES
+EXTRACT_STATIC         = YES
+EXTRACT_PRIVATE        = NO
+WARN_IF_UNDOCUMENTED   = NO
+WARN_IF_DOC_ERROR      = YES
+QUIET                  = YES
+
+#---------------------------------------------------------------------------
+# 输出
+#---------------------------------------------------------------------------
+GENERATE_HTML          = YES
+HTML_OUTPUT            = docs/api_html
+HTML_FILE_EXTENSION    = .html
+HTML_DYNAMIC_SECTIONS  = NO
+GENERATE_LATEX         = NO
+SOURCE_BROWSER         = YES
+INLINE_SOURCES         = NO
+REFERENCED_BY_RELATION = YES
+REFERENCES_RELATION    = YES
+SHOW_INCLUDE_FILES     = YES
+TAB_SIZE               = 4

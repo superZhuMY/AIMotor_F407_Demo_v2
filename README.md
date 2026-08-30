@@ -39,7 +39,9 @@ Keil MDK-ARM V5 + ARMCLANG：打开 `MDK-ARM/AIMotor_F407_Demo.uvprojx` 直接�
 
 ## 文档索引
 
-- `docs/Project_Architecture.md` — 系统架构、数据流、状态机设计
+- `docs/Project_Architecture.md` — 系统架构、数据流、状态机、时序预算、验收流程
 - `docs/API_Protocol_v1.0.md` — 上位机二进制协议规范
+- `docs/api_html/index.html` — **代码级 API 文档**（Doxygen 生成：`doxygen docs/Doxyfile`，Portable 版位于 `%LOCALAPPDATA%\Programs\doxygen\doxygen.exe`，源注释在 App/Inc 各头文件）
 - `docs/README_J456_DRIVER.md` — J4/J5/J6 驱动说明
 - `docs/MODIFICATION_REPORT_v1.3.md` — v1.3 安全返修记录
+- `tools/dev/README.md` — Windows 环境说明与本地自检工具
