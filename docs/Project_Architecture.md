@@ -1,0 +1,251 @@
+# 双机械臂电机控制系统 — 项目架构文档
+
+## 1. 系统概述
+
+基于 STM32F407VET6 的双机械臂电机控制固件。通过 4 路 RS485 总线控制 12 个电机（6 个 AI 电机 + 6 个慕纬度电机），上位机通过 UART 发送文本命令控制。
+
+## 2. 硬件
+
+| 项目 | 值 |
+|------|-----|
+| MCU | STM32F407VET6 (Cortex-M4, 168MHz, LQFP100) |
+| 开发工具链 | Keil MDK-ARM V5, ARMCLANG V6.24 |
+| HAL 库 | STM32Cube FW_F4 V1.28.3 |
+
+### 2.1 引脚分配
+
+| 外设 | 引脚 | 功能 | 波特率 | 所属臂 |
+|------|------|------|--------|--------|
+| USART1 | PA9(TX)/PA10(RX) | 上位机通信 | 115200-8N1 | — |
+| USART2 | PA2(TX)/PA3(RX) | AI 电机总线 #1 | 115200-8N2 | 左 |
+| USART3 | PB10(TX)/PB11(RX) | AI 电机总线 #2 | 115200-8N2 | 右 |
+| USART6 | PC6(TX)/PC7(RX) | MW 电机总线 #1 | 115200-8N1 | 左 |
+| UART5 | PC12(TX)/PD2(RX) | MW 电机总线 #2 | 115200-8N1 | 右 |
+| UART4 | PA0(TX)/PA1(RX) | 预留（舵机/串口屏） | — | — |
+| PB0 | GPIO_Output | AI 左臂 TX LED | — | — |
+| PB2 | GPIO_Output | AI 右臂 TX LED | — | — |
+| PE0 | GPIO_Output | MW 左臂 TX LED | — | — |
+| PE1 | GPIO_Output | MW 右臂 TX LED | — | — |
+
+### 2.2 电机映射
+
+每条 RS485 总线挂 3 个电机（站号 1/2/3）。左臂和右臂为镜像结构。
+
+**AI 电机（Modbus RTU，脉冲制）：**
+
+| 总线 | 命令前缀 | 轴 | M1 | M2 | M3 |
+|------|----------|-----|-----|-----|-----|
+| USART2 | B1 (左) | | X(横移) | Z(升降) | Y(伸缩) |
+| USART3 | B2 (右) | | X(横移) | Z(升降) | Y(伸缩) |
+
+**MW 电机（私有协议 0x3E，角度制，有耦合）：**
+
+| 总线 | 命令前缀 | ID1(J4) | ID2(J5) | ID3(J6) |
+|------|----------|---------|---------|---------|
+| USART6 | L (左) | 独立旋转 | Y轴旋转 | Y轴旋转(耦合) |
+| UART5 | R (右) | 独立旋转 | Y轴旋转 | Y轴旋转(耦合) |
+
+J5/J6 机械耦合关系：
+```
+motor5_target = J5_deg × 5/3 × 100
+motor6_target = J6_deg × 20/9 × 100 - motor5_target
+```
+
+## 3. 软件架构
+
+### 3.1 文件结构
+
+```
+Core/
+├── Inc/
+│   ├── main.h
+│   ├── aimotor.h      — AI 电机模块头文件
+│   ├── mwmotor.h      — MW 电机模块头文件
+│   ├── usart.h        — CubeMX 生成
+│   ├── dma.h          — CubeMX 生成
+│   └── gpio.h         — CubeMX 生成
+└── Src/
+    ├── main.c          — 主入口，薄层编排
+    ├── aimotor.c       — AI 电机 Modbus RTU 协议 + 状态机
+    ├── mwmotor.c       — MW 电机私有协议 + 状态机 + 耦合解算
+    ├── usart.c         — CubeMX 生成
+    ├── dma.c           — CubeMX 生成
+    ├── gpio.c          — CubeMX 生成
+    └── stm32f4xx_it.c  — 中断服务函数
+```
+
+### 3.2 模块职责
+
+**main.c** — 主入口：
+- 初始化外设 → Aimotor_Init() → MW_Init() → 启动 DMA
+- 主循环每 50ms 调用 Aimotor_Process() + MW_Process()
+- HAL_UARTEx_RxEventCallback 分发 DMA 回包到对应模块
+- 维护全局上位机命令缓冲 `g_host_rx_buf[]`
+
+**aimotor.c** — AI 电机模块：
+- Modbus RTU 协议实现（06H/10H/03H，CRC16）
+- 每电机私有 RX 缓冲（避免同总线多电机回包覆盖）
+- 后台自动轮询：空闲电机持续查询位置，保持缓存最新
+- 运动状态机：STOP→WRITE→TRIGGER→QUERY→WAIT_RX→IDLE
+- 上位机命令解析（B1/B2 前缀）
+
+**mwmotor.c** — MW 电机模块：
+- 私有协议实现（帧头 0x3E，和校验）
+- J5/J6 耦合解算
+- 与 aimotor 相同的轮询 + 状态机架构
+- 上位机命令解析（L/R 前缀）
+
+### 3.3 数据流
+
+```
+上位机(PC) ──USART1──→ main.c callback ─→ g_host_rx_buf[]
+                                              │
+                    ┌─────────────────────────┤
+                    ▼                         ▼
+              aimotor_Process()         mwmotor_Process()
+              (B/ALL 命令)              (L/R 命令)
+                    │                         │
+                    ▼                         ▼
+              状态机执行                 状态机执行
+              Modbus 命令               0x3E 命令
+                    │                         │
+          ┌─────────┤               ┌─────────┤
+          ▼         ▼               ▼         ▼
+       USART2    USART3          USART6    UART5
+       (左AI)    (右AI)          (左MW)    (右MW)
+```
+
+### 3.4 核心数据结构
+
+```c
+// AI 电机
+typedef struct {
+    uint8_t  slave_id;          // Modbus 站号 1/2/3
+    int32_t  target_position;   // 目标位置(脉冲)
+    int32_t  actual_position;   // 实际位置(脉冲)，后台轮询更新
+    uint16_t run_speed;         // 速度(rpm)
+    Aimotor_Step_t step;        // 状态机步骤
+    uint8_t  cmd_pending;       // 上位机命令待处理
+    // 私有 RX 缓冲
+    uint8_t  rx_buf[16];
+    volatile uint8_t rx_ready;
+    volatile uint8_t rx_len;
+} Aimotor_t;
+
+// 总线
+typedef struct {
+    UART_HandleTypeDef *huart;
+    GPIO_TypeDef *led_port;
+    uint16_t led_pin;
+    uint8_t tx_buf[50];         // 发送缓冲
+    uint8_t rx_buf[50];         // 总线级 DMA 缓冲
+} Aimotor_Bus_t;
+
+// 全局数组
+Aimotor_Bus_t aimotor_buses[2];       // [bus]
+Aimotor_t aimotor_motors[2][3];      // [bus][motor]
+```
+
+MW 模块结构类似，角度制替换脉冲制，J5/J6 有耦合字段。
+
+## 4. 通信协议
+
+### 4.1 AI 电机 — Modbus RTU
+
+| 寄存器 | 功能 | 功能码 | 值 |
+|--------|------|--------|-----|
+| H03_03 (0x0303) | 伺服使能 | 06H | 0=断开, 1=导通 |
+| H03_05 (0x0305) | 多段位启停 | 10H | 0=停止, 1=触发 |
+| H11_12 (0x110C) | 位移量 Int32 + 速度 UInt16 | 10H | CDAB 字节序(低16在前) |
+| H0B_07 (0x0B07) | 实际位置 Int32 | 03H | 读2寄存器 |
+
+### 4.2 MW 电机 — 私有协议 0x3E
+
+帧格式：`0x3E + CMD + ID + DataLen + CMD_SUM + [Data + DATA_SUM]`
+
+| 命令 | 功能 | 帧长 |
+|------|------|------|
+| 0x88 | 电机运行 | 5 |
+| 0x80 | 电机关闭 | 5 |
+| 0xA4 | 多圈位置控制(带速度限制) | 18 |
+| 0x92 | 读取多圈角度 | 5 |
+
+0xA4 数据：int64_t 角度(0.01°/LSB, 小端) + uint32_t 速度(0.01dps/LSB, 小端)
+
+### 4.3 上位机文本命令
+
+通过 USART1 (115200-8N1) 发送，以 `\r\n` 结尾。
+
+| 命令 | 功能 | 回复 |
+|------|------|------|
+| `B1 M1 P10000 S300` | 左臂 X 轴运动 | `OK B1 M1 P10000 S300` |
+| `B2 M3 P-5000 S500` | 右臂 Y 轴运动 | `OK B2 M3 P-5000 S500` |
+| `B1 M1 Q` | 查询位置(缓存) | `POS B1 M1 12345` |
+| `B1 M1 EN` | 单轴使能已禁用 | `ERR: single-axis EN disabled, use ALL ENABLE` |
+| `B1 STOP` | 全局停止双臂 12 轴 | `OK STOP: ACCEPTED` |
+| `L J5 30 J6 45 S180` | 左臂关节角度 | `OK L J5=30 J6=45 S=180` |
+| `L Q` | 查询关节角度 | `POS L J5=30 J6=45` |
+| `ALL STOP` | 全部急停 | `OK STOP: ACCEPTED` |
+
+## 5. 状态机设计
+
+### 5.1 空闲轮询（后台持续运行）
+
+```
+IDLE → QUERY → WAIT_RX → (收到回包) → ProcessRx → IDLE
+                                  ↓
+                          更新 actual_position
+```
+
+每电机通过 round-robin 调度，约每 150ms 查询一次。回包通过 DMA 回调按从站号路由到对应电机的私有缓冲，避免同总线电机互相覆盖。
+
+### 5.2 运动序列（上位机命令触发）
+
+```
+IDLE → (cmd_pending=1) → STOP → WRITE → TRIGGER → QUERY → WAIT_RX → ProcessRx → IDLE
+                                                         ↑ 超时重试(10次) |
+                                                         └────────────────┘
+```
+
+每个步骤在独立 tick 中执行（50ms tick × 3 电机轮转 = 每步 150ms）。
+
+### 5.3 DMA RX 回包处理
+
+```
+HAL_UARTEx_RxEventCallback (main.c)
+  ├── USART1? → 写入 g_host_rx_buf → g_host_rx_ready=1
+  ├── AI 总线? → Aimotor_RxCallback → 按 slave_id 路由到电机私有缓冲
+  └── MW 总线? → MW_RxCallback → 按 ID 路由到电机私有缓冲
+```
+
+### 5.4 命令分发（避免消费竞争）
+
+```
+Aimotor_Process():
+  if g_host_rx_ready && 首字符∈{B,A} → 消费，解析 B/ALL 命令
+
+MW_Process():
+  if g_host_rx_ready && 首字符∈{L,R} → 消费，解析 L/R 命令
+```
+
+两个模块各自只消费自己的命令前缀，互不干扰。
+
+## 6. 关键设计决策
+
+| 决策 | 理由 |
+|------|------|
+| **每电机私有 RX 缓冲** | 3 个电机共享一条 RS485 总线，只有一个 DMA 缓冲。回包到达时按从站号拷贝到对应电机私有缓冲，避免后续回包覆盖 |
+| **后台持续轮询** | MoveIt 需要 20-50Hz 位置反馈。空闲时自动持续查询，缓存始终最新，Q 命令直接返回缓存（零延迟） |
+| **文本命令协议** | 优于二进制协议：调试直观、跨语言通用、20 字节在 115200 下 ~1.8ms 可忽略 |
+| **06H vs 10H 功能码** | 伺服使能(0x0303)用 06H 可用，但启停(0x0305)和位置(0x110C)必须用 10H，与 CPP 参考代码一致 |
+| **模块分离** | AI 电机(Modbus)和 MW 电机(私有协议)各自独立模块，数据结构、状态机、协议函数完全隔离 |
+| **ROUND_ROBIN 调度** | 每条总线每次 tick 只处理一个电机，避免半双工 RS485 冲突。3 tick 轮完一圈 |
+
+## 7. 待完善项
+
+- [ ] MW 电机 J4 独立关节角度命令
+- [ ] 串口屏显示模块（UART4, PA0/PA1）
+- [ ] 运动到达自动上报
+- [ ] 上位机连接超时自动急停
+- [ ] Phase 2：扩展 USART6/UART5 为 MW 左右臂总线
+- [ ] 错误状态上报（电压、温度、堵转等）

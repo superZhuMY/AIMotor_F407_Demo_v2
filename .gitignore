@@ -1,0 +1,14 @@
+# Keil MDK 构建产物（可由工程重新生成）
+MDK-ARM/AIMotor_F407_Demo/
+MDK-ARM/Listings/
+MDK-ARM/Objects/
+MDK-ARM/JLinkLog/
+MDK-ARM/*.uvguix.*
+*.bak
+
+# 编辑器 / 工具会话
+.vscode/
+.zcode/
+
+# 系统文件
+Thumbs.db

@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>机械臂电机控制 API v1.0</title>
+<style>
+:root{--bg:#0d1117;--card:#161b22;--border:#30363d;--text:#c9d1d9;--accent:#58a6ff;--green:#3fb950;--red:#f85149;--yellow:#d2991d;--dim:#8b949e}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);line-height:1.6;padding:20px}
+h1{font-size:28px;margin-bottom:8px;color:#fff}
+h2{font-size:20px;margin:32px 0 16px;padding-bottom:8px;border-bottom:1px solid var(--border);color:#fff}
+h3{font-size:16px;margin:20px 0 8px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:20px;margin-bottom:16px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:14px}
+th,td{padding:8px 12px;text-align:left;border-bottom:1px solid var(--border)}
+th{background:#21262d;font-weight:600;color:var(--dim);font-size:12px;text-transform:uppercase}
+code{background:#21262d;padding:2px 6px;border-radius:4px;font-family:'JetBrains Mono','Fira Code',monospace;font-size:13px;color:var(--accent)}
+pre{background:#0d1117;border:1px solid var(--border);border-radius:6px;padding:16px;overflow-x:auto;font-size:13px;margin:12px 0}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:12px;font-weight:600}
+.badge-tx{background:#1a3a2a;color:var(--green)}
+.badge-rx{background:#2a1a1a;color:var(--red)}
+.badge-cmd{background:#1a2a3a;color:var(--accent)}
+.badge-resp{background:#2a2a1a;color:var(--yellow)}
+.cmd-block{border-left:3px solid var(--accent);padding-left:12px;margin:8px 0}
+.resp-block{border-left:3px solid var(--yellow);padding-left:12px;margin:8px 0}
+.note{background:#1a2a1a;border:1px solid #2a4a2a;border-radius:6px;padding:12px;margin:12px 0;font-size:13px}
+.warn{background:#2a2a1a;border:1px solid #4a4a2a;border-radius:6px;padding:12px;margin:12px 0;font-size:13px}
+.pin{font-family:monospace;font-size:12px;color:var(--accent)}
+.arm-label{text-align:center;font-size:18px;font-weight:700;padding:8px;border-radius:6px;margin-bottom:12px}
+.arm-l{background:#1a2a3a;color:var(--accent)}
+.arm-r{background:#2a1a1a;color:var(--red)}
+</style>
+</head>
+<body>
+
+<h1>&#x1F9BE; 双机械臂电机控制 API v1.0</h1>
+<p style="color:var(--dim)">STM32F407VET6 串行协议接口文档 &mdash; 供上位机/Web前端开发者使用</p>
+
+<!-- ============================================================ -->
+<h2>&#x1F4E1; 物理连接</h2>
+<div class="card">
+<table>
+<tr><th>上位机 ↔ STM32</th><th>STM32 引脚</th><th>接什么</th><th>波特率</th></tr>
+<tr><td>串口</td><td class="pin">PA9 (TX) / PA10 (RX)</td><td>USB转TTL模块</td><td><code>115200-8N1</code></td></tr>
+</table>
+</div>
+
+<!-- ============================================================ -->
+<h2>&#x1F9F0; 电机总线布局</h2>
+
+<div class="grid2">
+<div>
+<div class="arm-label arm-l">&#x25C0; 左臂 (L)</div>
+<table>
+<tr><th>轴</th><th>电机</th><th>类型</th><th>总线</th><th>引脚</th></tr>
+<tr><td>X (左右)</td><td>M1</td><td>AI Modbus</td><td rowspan="3"><span class="badge badge-cmd">B1</span> USART2<br><span class="pin">PA2/PA3</span></td><td rowspan="3">TTL转485<br>115200-8N2</td></tr>
+<tr><td>Z (上下)</td><td>M2</td><td>AI Modbus</td></tr>
+<tr><td>Y (前后)</td><td>M3</td><td>AI Modbus</td></tr>
+<tr><td>J5 旋转</td><td>ID2</td><td>MW 0x3E</td><td rowspan="2"><span class="badge badge-cmd">L</span> USART6<br><span class="pin">PC6/PC7</span></td><td rowspan="2">TTL转485<br>115200-8N1</td></tr>
+<tr><td>J6 旋转</td><td>ID3</td><td>MW 0x3E</td></tr>
+</table>
+</div>
+<div>
+<div class="arm-label arm-r">&#x25B6; 右臂 (R)</div>
+<table>
+<tr><th>轴</th><th>电机</th><th>类型</th><th>总线</th><th>引脚</th></tr>
+<tr><td>X (左右)</td><td>M1</td><td>AI Modbus</td><td rowspan="3"><span class="badge badge-cmd">B2</span> USART3<br><span class="pin">PB10/PB11</span></td><td rowspan="3">TTL转485<br>115200-8N2</td></tr>
+<tr><td>Z (上下)</td><td>M2</td><td>AI Modbus</td></tr>
+<tr><td>Y (前后)</td><td>M3</td><td>AI Modbus</td></tr>
+<tr><td>J5 旋转</td><td>ID2</td><td>MW 0x3E</td><td rowspan="2"><span class="badge badge-cmd">R</span> UART5<br><span class="pin">PC12/PD2</span></td><td rowspan="2">TTL转485<br>115200-8N1</td></tr>
+<tr><td>J6 旋转</td><td>ID3</td><td>MW 0x3E</td></tr>
+</table>
+</div>
+</div>
+
+<div class="note">&#x26A0; TX/RX <b>交叉接</b>：STM32 TX → 模块 RX，STM32 RX → 模块 TX</div>
+
+<!-- ============================================================ -->
+<h2>&#x1F4E8; AI 电机命令 (Modbus RTU)</h2>
+<p style="color:var(--dim)">前缀 <code>B1</code> = 左臂, <code>B2</code> = 右臂 &middot; 所有命令以 <code>\r\n</code> 结尾</p>
+
+<div class="card">
+<h3>&#x1F3AF; 位置控制</h3>
+<div class="cmd-block">
+<code>B1 M1 P10000 S300</code>
+</div>
+<p>B1=左臂, M1=电机1(X轴), P=位置(脉冲), S=速度(rpm)</p>
+
+<table>
+<tr><th>参数</th><th>范围</th><th>单位</th><th>说明</th></tr>
+<tr><td>P (position)</td><td>-9999999 ~ 9999999</td><td>脉冲</td><td>负数=反向</td></tr>
+<tr><td>S (speed)</td><td>0 ~ 6000</td><td>rpm</td><td>默认300</td></tr>
+</table>
+</div>
+
+<div class="grid3">
+<div class="card">
+<h3>&#x1F50D; 查询位置</h3>
+<pre>B1 M1 Q</pre>
+<div class="resp-block"><code>POS B1 M1 12345</code></div>
+<p style="color:var(--dim);font-size:13px">返回当前位置(脉冲)</p>
+</div>
+<div class="card">
+<h3>&#x26A1; 使能</h3>
+<pre>B1 M1 EN</pre>
+<div class="resp-block"><code>ERR: single-axis EN disabled, use ALL ENABLE</code></div>
+<p style="color:var(--dim);font-size:13px">单轴使能已禁用；使用二进制全局 ENABLE</p>
+</div>
+<div class="card">
+<h3>&#x1F6D1; 停止</h3>
+<pre>B1 STOP</pre>
+<div class="resp-block"><code>OK STOP: ACCEPTED</code></div>
+<p style="color:var(--dim);font-size:13px">全局停止双臂 12 轴；B1 仅兼容保留</p>
+</div>
+</div>
+
+<div class="grid3">
+<div class="card">
+<h3>&#x1F3E0; 回零</h3>
+<pre>B1 M1 HOME</pre>
+<div class="resp-block"><code>OK B1 M1 HOME</code></div>
+<p style="color:var(--dim);font-size:13px">电机归零位</p>
+</div>
+<div class="card">
+<h3>&#x1F50C; 测试</h3>
+<pre>B1 TEST</pre>
+<div class="resp-block"><code>ERR B TEST DISABLED: use binary ENABLE</code></div>
+<p style="color:var(--dim);font-size:13px">危险的直通 Servo On 测试入口已禁用</p>
+</div>
+<div class="card">
+<h3>&#x26A0; 急停</h3>
+<pre>ALL STOP</pre>
+<div class="resp-block"><code>OK STOP: ACCEPTED</code></div>
+<p style="color:var(--dim);font-size:13px">双臂 12 轴全局安全停止</p>
+</div>
+</div>
+
+<!-- ============================================================ -->
+<h2>&#x1F4E8; 慕纬度电机命令 (私有协议 0x3E)</h2>
+<p style="color:var(--dim)">前缀 <code>L</code> = 左臂, <code>R</code> = 右臂 &middot; 角度制</p>
+
+<div class="grid2">
+<div class="card">
+<h3>&#x1F3AF; 关节角度控制 (带耦合解算)</h3>
+<div class="cmd-block"><code>L J5 30 J6 45 S180</code></div>
+<div class="resp-block"><code>OK L J5=30 J6=45 S=180</code></div>
+<table>
+<tr><th>参数</th><th>范围</th><th>单位</th></tr>
+<tr><td>J5</td><td>-36000 ~ 36000</td><td>度 (°)</td></tr>
+<tr><td>J6</td><td>-36000 ~ 36000</td><td>度 (°)</td></tr>
+<tr><td>S (speed)</td><td>1 ~ 36000</td><td>°/s</td></tr>
+</table>
+<div class="note">J5/J6 有机械耦合，MCU 内部自动解算为电机目标值</div>
+</div>
+<div class="card">
+<h3>&#x1F50D; 查询角度</h3>
+<pre>L Q</pre>
+<div class="resp-block"><code>POS L J5=30 J6=45</code></div>
+<p style="color:var(--dim);font-size:13px">返回解算后的关节角度(度)</p>
+<h3 style="margin-top:16px">&#x1F6D1; 停止 / &#x1F3E0; 回零</h3>
+<pre>L STOP
+L HOME</pre>
+</div>
+</div>
+
+<!-- ============================================================ -->
+<h2>&#x1F916; 通信协议规范</h2>
+
+<div class="card">
+<table>
+<tr><th>项</th><th>值</th></tr>
+<tr><td>物理层</td><td>UART TTL (3.3V)</td></tr>
+<tr><td>波特率</td><td><code>115200</code></td></tr>
+<tr><td>数据位</td><td><code>8</code></td></tr>
+<tr><td>校验位</td><td><code>None</code></td></tr>
+<tr><td>停止位</td><td><code>1</code></td></tr>
+<tr><td>编码</td><td>ASCII 文本</td></tr>
+<tr><td>行尾</td><td><code>\r\n</code> (CR+LF)</td></tr>
+<tr><td>超时</td><td>建议 500ms</td></tr>
+</table>
+</div>
+
+<h3>命令格式</h3>
+<pre>&lt;前缀&gt; &lt;参数...&gt; \r\n</pre>
+
+<h3>回复类型</h3>
+<div class="grid2">
+<div class="cmd-block">
+<code>OK B1 M1 P10000 S300</code><br>
+<span style="color:var(--dim);font-size:13px">命令确认（运动/停止/使能）</span>
+</div>
+<div class="resp-block">
+<code>POS B1 M1 12345</code><br>
+<span style="color:var(--dim);font-size:13px">位置查询回复</span>
+</div>
+</div>
+
+<!-- ============================================================ -->
+<h2>&#x1F4E6; 电机 ↔ 机械轴映射</h2>
+
+<div class="grid2">
+<div class="card">
+<h3>左臂</h3>
+<table>
+<tr><th>命令</th><th>轴</th><th>运动方向</th></tr>
+<tr><td><code>B1 M1</code></td><td>X</td><td>左右横移</td></tr>
+<tr><td><code>B1 M2</code></td><td>Z</td><td>上下升降</td></tr>
+<tr><td><code>B1 M3</code></td><td>Y</td><td>前后伸缩</td></tr>
+<tr><td><code>L J5</code></td><td>J5</td><td>Y轴旋转</td></tr>
+<tr><td><code>L J6</code></td><td>J6</td><td>Y轴旋转(耦合)</td></tr>
+</table>
+</div>
+<div class="card">
+<h3>右臂</h3>
+<table>
+<tr><th>命令</th><th>轴</th><th>运动方向</th></tr>
+<tr><td><code>B2 M1</code></td><td>X</td><td>左右横移</td></tr>
+<tr><td><code>B2 M2</code></td><td>Z</td><td>上下升降</td></tr>
+<tr><td><code>B2 M3</code></td><td>Y</td><td>前后伸缩</td></tr>
+<tr><td><code>R J5</code></td><td>J5</td><td>Y轴旋转</td></tr>
+<tr><td><code>R J6</code></td><td>J6</td><td>Y轴旋转(耦合)</td></tr>
+</table>
+</div>
+</div>
+
+<!-- ============================================================ -->
+<h2>&#x1F4CA; JavaScript 接口示例</h2>
+<div class="card">
+<pre>
+// 使用 Web Serial API (Chrome/Edge)
+const port   = await navigator.serial.requestPort();
+await port.open({ baudRate: 115200 });
+const writer = port.writable.getWriter();
+const reader = port.readable.getReader();
+
+// 发送命令
+function send(cmd) {
+  const enc = new TextEncoder();
+  writer.write(enc.encode(cmd + '\r\n'));
+}
+
+// 读取回复
+async function readLine() {
+  let buf = '';
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += new TextDecoder().decode(value);
+    const i = buf.indexOf('\n');
+    if (i >= 0) return buf.slice(0, i).trim();
+  }
+}
+
+// 控制左臂 X 轴运动
+await send('B1 M1 P10000 S300');      // X轴右移
+await send('B1 M1 Q');                // 查询位置
+await send('B1 STOP');                // 停止
+
+// 控制左臂关节
+await send('L J5 30 J6 45 S180');    // J5=30° J6=45° 速度180°/s
+await send('L Q');                    // 查询角度
+</pre>
+</div>
+
+<!-- ============================================================ -->
+<h2>&#x26A0; 调试命令（问题排查用）</h2>
+<div class="warn">
+<table>
+<tr><th>命令</th><th>用途</th></tr>
+<tr><td><code>B2 TEST</code></td><td>给右臂3个电机全发使能，测试RS485总线是否通</td></tr>
+<tr><td><code>B2 M1 EN</code></td><td>单独使能右臂电机1，排查站号问题</td></tr>
+<tr><td><code>B2 M2 EN</code></td><td>单独使能右臂电机2</td></tr>
+<tr><td><code>B2 M3 EN</code></td><td>单独使能右臂电机3</td></tr>
+<tr><td><code>B2 M1 Q</code></td><td>读电机1位置，确认双向通信</td></tr>
+</table>
+
+<p style="margin-top:8px">如果 LED 闪但电机不响应：检查波特率（CPP代码用57600/你的电机可能是57600）、接线交叉、站号</p>
+</div>
+
+<p style="text-align:center;color:var(--dim);margin-top:48px;font-size:12px">
+STM32F407VET6 Motor Control API v1.0 &mdash; 2026-07
+</p>
+
+</body>
+</html>
