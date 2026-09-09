@@ -2,6 +2,8 @@
 # 工程将其作为固定链接输入（不会在构建时自动重建），必须入库
 MDK-ARM/AIMotor_F407_Demo/*
 !MDK-ARM/AIMotor_F407_Demo/AIMotor_F407_Demo.sct
+# 固件 hex 例外：需要多端同步/直接烧录，故入库（其余 .o/.axf/.map 等仍忽略）
+!MDK-ARM/AIMotor_F407_Demo/AIMotor_F407_Demo.hex
 MDK-ARM/Listings/
 MDK-ARM/Objects/
 MDK-ARM/JLinkLog/
