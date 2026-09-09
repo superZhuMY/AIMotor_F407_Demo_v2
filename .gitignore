@@ -6,6 +6,8 @@ MDK-ARM/Listings/
 MDK-ARM/Objects/
 MDK-ARM/JLinkLog/
 MDK-ARM/*.uvguix.*
+# Keil 用户界面/调试器个人配置（每次打开工程都会改写，非工程内容）
+MDK-ARM/*.uvoptx
 *.bak
 
 # 编辑器 / 工具会话
