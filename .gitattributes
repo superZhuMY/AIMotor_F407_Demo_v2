@@ -1,0 +1,10 @@
+# 二进制/构建产物：禁止任何行尾转换，保证各端字节完全一致
+*.hex   -text
+*.axf   -text
+*.bin   -text
+*.sct   -text
+
+# Keil 工程文件：统一 LF，避免 Windows/Linux 之间产生无意义的整文件 diff
+*.uvprojx  text eol=lf
+*.uvoptx   text eol=lf
+*.dbgconf  text eol=lf
