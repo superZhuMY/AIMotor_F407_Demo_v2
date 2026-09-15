@@ -42,10 +42,11 @@ class Link:
 
     def connect(self, port):
         self.close()
-        self.ser = serial.Serial(port, 115200, timeout=.05)
-        self.ser.reset_input_buffer()
+        ser = serial.Serial(port, 115200, timeout=.05)
+        ser.reset_input_buffer()
+        self.ser = ser
         self.running = True
-        threading.Thread(target=self.reader, daemon=True).start()
+        threading.Thread(target=self.reader, args=(ser,), daemon=True).start()
 
     def close(self):
         self.running = False
@@ -63,11 +64,11 @@ class Link:
             self.ser.write(packet(cmd, seq, payload))
             return seq
 
-    def reader(self):
+    def reader(self, ser):
         buf = bytearray()
-        while self.running and self.ser:
+        while self.running and ser.is_open:
             try:
-                data = self.ser.read(self.ser.in_waiting or 1)
+                data = ser.read(ser.in_waiting or 1)
                 if data: buf.extend(data)
                 while True:
                     start = buf.find(b"\xaa\x55")
@@ -82,11 +83,15 @@ class Link:
                     total = 10 + size
                     if len(buf) < total: break
                     raw = bytes(buf[:total]); del buf[:total]
-                    if struct.unpack_from("<H", raw, total-2)[0] == crc16(raw[2:-2]):
+                    received_crc = struct.unpack_from("<H", raw, total-2)[0]
+                    calculated_crc = crc16(raw[2:-2])
+                    if received_crc == calculated_crc:
                         self.events.put(("frame", (cmd, seq, raw[8:-2])))
                     else:
-                        self.events.put(("log", "收到 CRC 错误帧"))
-            except (serial.SerialException, OSError) as exc:
+                        self.events.put(("log",
+                            f"响应帧 CRC 不一致: 收到={received_crc:04X} "
+                            f"计算={calculated_crc:04X} RAW={raw.hex(' ')}"))
+            except (serial.SerialException, OSError, TypeError) as exc:
                 if self.running: self.events.put(("error", str(exc)))
                 break
 
@@ -180,7 +185,9 @@ class App(tk.Tk):
     def send(self,cmd,payload=b"",quiet=False):
         try:
             seq=self.link.send(cmd,payload)
-            if not quiet:self.log(f"TX #{seq} {CMD_NAME.get(cmd,hex(cmd))}")
+            if not quiet:
+                raw=packet(cmd,seq,payload)
+                self.log(f"TX #{seq} {CMD_NAME.get(cmd,hex(cmd))} RAW={raw.hex(' ')}")
         except (serial.SerialException,OSError) as exc:
             if not quiet:messagebox.showerror("发送失败",str(exc))
 
@@ -217,7 +224,9 @@ class App(tk.Tk):
     def handle(self,cmd,seq,payload):
         if cmd==ACK and len(payload)==4:
             ack_seq,origin,result=struct.unpack("<HBB",payload)
-            self.log(f"RX ACK #{ack_seq} {CMD_NAME.get(origin,hex(origin))}: {RESULT.get(result,hex(result))}")
+            prefix="下位机判定请求 CRC 错误: " if result==1 else ""
+            self.log(f"RX ACK #{ack_seq} {CMD_NAME.get(origin,hex(origin))}: "
+                     f"{prefix}{RESULT.get(result,hex(result))}")
         elif cmd==STATE and len(payload)==60:
             _,state,fault,valid,enabled,axis=struct.unpack_from("<HBBHHI",payload)
             joints=struct.unpack_from("<12i",payload,12)
