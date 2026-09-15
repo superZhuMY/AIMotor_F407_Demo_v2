@@ -85,9 +85,9 @@ Python 语义点显式对齐（`//` → `pdiv`，`round()` 半值向偶数 → `
 上述两个脚本只做语法结构层检查，查不出语义/链接期问题，**必须以 Keil 编译为
 最终门**。
 
-## 5. USART2/USART3 停止位：已确认为 8N1 并统一
+## 5. 停止位全部统一为 8N1（USART1/USART2/USART3）
 
-返修期间发现三处配置互相矛盾（下表为**修改前**状态）：
+返修期间发现 `.ioc` 与生成代码、文档互相矛盾（下表为**修改前**状态）：
 
 | 来源 | USART1 | USART2（左 AI） | USART3（右 AI） |
 |------|--------|-----------------|-----------------|
@@ -95,22 +95,21 @@ Python 语义点显式对齐（`//` → `pdiv`，`round()` 半值向偶数 → `
 | `Core/Src/usart.c`（运行期实际生效） | `UART_STOPBITS_1` | `UART_STOPBITS_1` | `UART_STOPBITS_1` |
 | `Project_Architecture.md` / `README_J456_DRIVER.md` | 8N1 | ~~8N2~~ | ~~8N2~~ |
 
-经确认真机为 8N1，现已统一（`.ioc`、`usart.c`、文档三者一致）：
+经确认真机全部为 8N1，现已统一（`.ioc`、`usart.c`、文档三者一致）：
 
-- `AIMotor_F407_Demo.ioc`：移除 `USART2.StopBits=STOPBITS_2` 并把 `StopBits` 从
-  `USART2.IPParameters` 中删去——`STOPBITS_1` 是 CubeMX 默认值，默认配置按惯例
-  不写入 `.ioc`，这正是 USART3/USART6/UART5 的既有形态。USART3 无需改动。
-- `Core/Src/usart.c`：`huart2`/`huart3` 本就是 `UART_STOPBITS_1`，**无需改动**。
-  也就是说本次修复的是 `.ioc` 与文档，运行期代码原本就是 8N1。
+- `AIMotor_F407_Demo.ioc`：移除 `USART1.StopBits=STOPBITS_2` 与
+  `USART2.StopBits=STOPBITS_2`，并把 `StopBits` 从两者的 `IPParameters` 中删去——
+  `STOPBITS_1` 是 CubeMX 默认值，默认配置按惯例不写入 `.ioc`，这正是
+  USART3/USART6/UART5 的既有形态。USART3 本就无该键，无需改动。
+- `Core/Src/usart.c`：五个 UART 本就是 `UART_STOPBITS_1`，**无需改动**。
+  也就是说本次修复的是 `.ioc` 与文档，运行期代码原本就是 8N1，
+  **不需要为此重新验证电机通信**（波特率、字长、校验位均未变）。
 - 文档：`Project_Architecture.md` §2.1 与 §8、`README_J456_DRIVER.md` §1、
-  `API_Reference.html` 中的 8N2 全部改为 8N1；§8 时序按 10 bit/字节重算
+  `API_Reference.html` 中 AI 总线的 8N2 全部改为 8N1；§8 时序按 10 bit/字节重算
   （115200 8N1 ≈ 86.8µs/字节，原按 11 bit 写的 95.5µs）。
 
-**遗留项**：`.ioc` 中 `USART1.StopBits=STOPBITS_2` 仍然存在，与 `usart.c`
-（`UART_STOPBITS_1`）及文档（上位机 8N1）不一致，实际运行也是 8N1。本次按指定
-范围只处理 USART2/USART3，未改动 USART1；**该项已记入 `Project_Architecture.md`
-§7 待完善项**。USART1 真机参数确认后应一并移除，否则下次用 CubeMX 从该 `.ioc`
-重新生成会静默把上位机链路改成 2 个停止位。
+修复后 `.ioc` 中已无任何 `StopBits` 项，与生成代码不会再出现分歧：之后无论是否
+用 CubeMX 从该 `.ioc` 重新生成，五个 UART 都保持 8N1。
 
 ## 6. 建议烧录前步骤
 
