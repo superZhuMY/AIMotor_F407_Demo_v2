@@ -347,6 +347,7 @@ void Aimotor_Process(void)
         motor = (owner != 0xFF) ? &aimotor_motors[b][owner]
                                 : &aimotor_motors[b][round_robin];
         uint8_t mi = (uint8_t)(motor - aimotor_motors[b]);
+        uint8_t defer_next_tx = 0U;
 
         /* 只在没有未完成请求时接收新目标，避免打断一个Modbus事务。 */
         if (motor->cmd_pending &&
@@ -373,9 +374,11 @@ void Aimotor_Process(void)
                 switch (motor->step) {
                 case MOTOR_STEP_WAIT_STOP:
                     motor->step = MOTOR_STEP_WRITE;
+                    defer_next_tx = 1U;
                     break;
                 case MOTOR_STEP_WAIT_WRITE:
                     motor->step = MOTOR_STEP_TRIGGER;
+                    defer_next_tx = 1U;
                     break;
                 case MOTOR_STEP_WAIT_TRIGGER:
 #if AIMOTOR_ENABLE_ARRIVAL_CHECK
@@ -429,6 +432,12 @@ void Aimotor_Process(void)
                     break;
                 }
             }
+        }
+
+        /* 驱动器确认 STOP/WRITE 后，等到下一次 5ms 调度再发送后续命令。
+           保留旧版已验证流程中的命令间隔，避免同一轮紧接着写下一寄存器。 */
+        if (defer_next_tx) {
+            continue;
         }
 
         switch (motor->step) {
