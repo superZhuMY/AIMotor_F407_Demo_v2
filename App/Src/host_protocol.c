@@ -58,6 +58,12 @@ uint8_t g_host_dma_buf[64];
 /* 文本命令错误/确认回复缓冲（HostCmd_Parse/Execute 专用） */
 static char g_host_tx_buf[96];
 
+/* USART1 异步（IT）发送的持久 TX 缓冲：HAL_UART_Transmit_IT 只保存源地址、
+   不做拷贝，调用方若传入局部栈数组，函数返回后异步发送期间数据即失效。
+   所有回复先拷入此处再启动 IT 发送。80 字节覆盖当前最大 STATE 帧 70 字节。 */
+#define HOST_TX_BUF_SIZE 80U
+static uint8_t g_host_tx_async_buf[HOST_TX_BUF_SIZE];
+
 static int32_t BinaryReadI32(const uint8_t *p)
 {
     uint32_t v = (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
@@ -972,20 +978,32 @@ void Host_ProtocolInit(void)
 
 /* 非阻塞回复发送（USART1 中断方式）：上一帧未发完时有界等待，异常时退化为
    阻塞发送。所有上位机回复（ACK/STATE/文本）统一走此通道，5ms 调度循环
-   不再被 STATE 帧的 ~6ms 阻塞发送拖住。仅在主循环上下文调用。 */
+   不再被 STATE 帧的 ~6ms 阻塞发送拖住。仅在主循环上下文调用。
+   数据先拷入持久静态缓冲 g_host_tx_async_buf，避免调用方局部栈数组在异步
+   发送期间失效（HAL_UART_Transmit_IT 不复制数据，只保存源地址）。 */
 void Host_ReplyBytes(const uint8_t *data, uint16_t len)
 {
-    if (data == NULL || len == 0U) {
+    if (data == NULL || len == 0U || len > HOST_TX_BUF_SIZE) {
         return;
     }
+
+    /* 必须等上一帧发完（UART 回到 READY）才能覆盖 g_host_tx_async_buf；
+       超时仍不 READY 则丢弃本帧，绝不覆盖正在发送的缓冲。 */
     uint32_t start = HAL_GetTick();
     while (huart1.gState != HAL_UART_STATE_READY) {
         if ((HAL_GetTick() - start) >= HOST_TX_WAIT_MS) {
-            break;
+            return;
         }
     }
-    if (HAL_UART_Transmit_IT(&huart1, (uint8_t *)data, len) != HAL_OK) {
-        (void)HAL_UART_Transmit(&huart1, (uint8_t *)data, len, 100);
+
+    memcpy(g_host_tx_async_buf, data, len);
+
+    if (HAL_UART_Transmit_IT(&huart1, g_host_tx_async_buf, len) != HAL_OK) {
+        /* IT 启动失败时允许退化为 blocking TX（缓冲已是持久副本）。 */
+        (void)HAL_UART_Transmit(&huart1,
+                                g_host_tx_async_buf,
+                                len,
+                                HOST_TX_WAIT_MS);
     }
 }
 

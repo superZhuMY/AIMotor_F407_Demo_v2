@@ -285,7 +285,7 @@ MW_Process():
 | **模块分离** | AI 电机(Modbus)和 MW 电机(私有协议)各自独立模块，数据结构、状态机、协议函数完全隔离 |
 | **ROUND_ROBIN 调度** | 每条总线每次 tick 只处理一个电机，避免半双工 RS485 冲突。3 tick 轮完一圈 |
 | **五模块拆分** | aimotor.c 按职责拆为电机核心/Modbus 编解码/控制序列/上位机协议/自检五个文件，公共 API 不变；跨文件内部符号收敛在 aimotor_internal.h |
-| **非阻塞回复通道** | 上位机回复（ACK/STATE/文本）统一走 Host_ReplyBytes 中断发送，5ms 调度循环不再被 70 字节 STATE 帧 ~6ms 的阻塞发送拖住 |
+| **非阻塞回复通道** | 上位机回复（ACK/STATE/文本）统一走 Host_ReplyBytes 中断发送，5ms 调度循环不再被 70 字节 STATE 帧 ~6ms 的阻塞发送拖住；发送前先拷入持久静态缓冲 `g_host_tx_async_buf[80]`（`HAL_UART_Transmit_IT` 不复制数据，直传栈数组会在异步发送期间失效），等待上一帧超时则丢弃本帧而不覆盖在发缓冲（v1.4） |
 | **环形缓冲流解析** | USART1 的 ISR 只做字节追加，拆包/粘包/CRC 重同步全部在主循环完成；解析有迭代上限，绝不阻塞 |
 
 ## 7. 待完善项
@@ -299,6 +299,7 @@ MW_Process():
 - [ ] 错误状态上报（电压、温度、堵转等，经驱动器状态寄存器读入 STATE 帧）
 - [ ] 上位机正式 ROS 节点：消费 STATE 关节侧 µm/µrad，删除旧节点的 LINEAR_FACTORS 二次换算（参考 tools/host_reference/）
 - [x] 提高总线波特率——**不可行**：驱动器波特率上限即 115200（手册 H0C_02 设置值 0~6）；序列往返削减是唯一软件杠杆（v1.4 已砍 QUERY）
+- [ ] **USART2/USART3 停止位待实机确认**：`.ioc` 写 `USART2.StopBits=STOPBITS_2`（USART3 无该键，默认 1），而 `Core/Src/usart.c` 五个 UART 全为 `UART_STOPBITS_1`，文档（§2.1 本表、README_J456_DRIVER）却称 AI 总线为 8N2 → 当前固件实际跑 **8N1**。需示波器/逻辑分析仪确认 AI 总线真实帧格式，再对齐 `.ioc`、`usart.c`、文档三者；否则下次用 CubeMX 从该 `.ioc` 重新生成会静默把 USART1/USART2 改成 2 停止位（USART1 按文档应为 8N1，会改坏上位机链路）
 
 ## 8. 时序与性能预算
 

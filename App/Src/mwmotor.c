@@ -90,11 +90,8 @@ void MW_SendBytes(uint8_t bus_idx, uint16_t len)
         return;
     }
     g_dry_run_mw_tx_count++;   /* 真实发送计数（DRY_RUN 下永不执行，恒为 0） */
-    uint32_t start = HAL_GetTick();
-    while (__HAL_UART_GET_FLAG(bus->huart, UART_FLAG_TC) == RESET) {
-        if ((HAL_GetTick() - start) >= MW_TIMEOUT_MS)
-            break;
-    }
+    /* HAL_UART_Transmit 返回即表示最后一个停止位已送出（内部已等待 TC），
+       此处不再重复等待 UART_FLAG_TC。 */
 
     if (bus->led_port)
         HAL_GPIO_WritePin(bus->led_port, bus->led_pin, GPIO_PIN_RESET);

@@ -103,13 +103,8 @@ void Aimotor_BusSendBytes(uint8_t bus_idx, uint16_t len)
     }
     g_dry_run_ai_tx_count++;   /* 真实发送计数（DRY_RUN 下永不执行，恒为 0） */
 
-    /* 等待停止位完全送出 */
-    uint32_t start = HAL_GetTick();
-    while (__HAL_UART_GET_FLAG(bus->huart, UART_FLAG_TC) == RESET) {
-        if ((HAL_GetTick() - start) >= AIMOTOR_DMA_TIMEOUT) {
-            break;
-        }
-    }
+    /* HAL_UART_Transmit 返回即表示最后一个停止位已送出（内部已等待 TC），
+       此处不再重复等待 UART_FLAG_TC。 */
 
     /* TX LED 灭 */
     if (bus->led_port) {

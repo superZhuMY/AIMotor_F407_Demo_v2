@@ -47,7 +47,12 @@ MSYS2/MinGW-w64，装好后即可恢复返修报告里 `gcc -fsyntax-only` 的�
 |------|------|------|
 | `node tools/dev/balance_check.js` | 括号平衡粗检（App/Core 全部 C/H） | 无 |
 | `node tools/dev/syntax_check.js`  | tree-sitter 语法解析，**对比 HEAD 基线只报新错误** | 首次：`cd tools/dev && npm install --no-audit --no-fund` |
-| `python tools/protocol_test.py`   | 上位机协议回归（60 项） | 真 Python（见上） |
+| `node tools/dev/protocol_test.js` | 上位机协议回归（60 项）——`protocol_test.py` 的 Node 等价移植 | 无 |
+| `python tools/protocol_test.py`   | 上位机协议回归（60 项，**原始权威脚本**） | 真 Python（见上） |
+
+> `protocol_test.js` 是为"本机无 Python"准备的等价副本：断言与计数值 1:1 对齐，
+> 并把 Python 语义点显式对齐（`//` → `pdiv`，`round()` 半值向偶数 → `pround`）。
+> **改了协议断言请两边同步**，权威行为仍以 `protocol_test.py` 为准。
 
 退出码约定：`0` 通过，`1` 发现回归，`2` 环境问题（缺依赖等）。
 新文件未提交时无基线可比，请先 commit 再检查（README 已注明）。
