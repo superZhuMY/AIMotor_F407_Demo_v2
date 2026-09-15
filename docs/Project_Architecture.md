@@ -17,8 +17,8 @@
 | 外设 | 引脚 | 功能 | 波特率 | 所属臂 |
 |------|------|------|--------|--------|
 | USART1 | PA9(TX)/PA10(RX) | 上位机通信 | 115200-8N1 | — |
-| USART2 | PA2(TX)/PA3(RX) | AI 电机总线 #1 | 115200-8N2 | 左 |
-| USART3 | PB10(TX)/PB11(RX) | AI 电机总线 #2 | 115200-8N2 | 右 |
+| USART2 | PA2(TX)/PA3(RX) | AI 电机总线 #1 | 115200-8N1 | 左 |
+| USART3 | PB10(TX)/PB11(RX) | AI 电机总线 #2 | 115200-8N1 | 右 |
 | USART6 | PC6(TX)/PC7(RX) | MW 电机总线 #1 | 115200-8N1 | 左 |
 | UART5 | PC12(TX)/PD2(RX) | MW 电机总线 #2 | 115200-8N1 | 右 |
 | UART4 | PA0(TX)/PA1(RX) | 预留（舵机/串口屏） | — | — |
@@ -299,11 +299,12 @@ MW_Process():
 - [ ] 错误状态上报（电压、温度、堵转等，经驱动器状态寄存器读入 STATE 帧）
 - [ ] 上位机正式 ROS 节点：消费 STATE 关节侧 µm/µrad，删除旧节点的 LINEAR_FACTORS 二次换算（参考 tools/host_reference/）
 - [x] 提高总线波特率——**不可行**：驱动器波特率上限即 115200（手册 H0C_02 设置值 0~6）；序列往返削减是唯一软件杠杆（v1.4 已砍 QUERY）
-- [ ] **USART2/USART3 停止位待实机确认**：`.ioc` 写 `USART2.StopBits=STOPBITS_2`（USART3 无该键，默认 1），而 `Core/Src/usart.c` 五个 UART 全为 `UART_STOPBITS_1`，文档（§2.1 本表、README_J456_DRIVER）却称 AI 总线为 8N2 → 当前固件实际跑 **8N1**。需示波器/逻辑分析仪确认 AI 总线真实帧格式，再对齐 `.ioc`、`usart.c`、文档三者；否则下次用 CubeMX 从该 `.ioc` 重新生成会静默把 USART1/USART2 改成 2 停止位（USART1 按文档应为 8N1，会改坏上位机链路）
+- [x] **AI 总线停止位统一 8N1**：真机确认为 8N1，已移除 `.ioc` 中 `USART2.StopBits=STOPBITS_2`（USART3 本就无该键，默认即 1），与 `Core/Src/usart.c`（`UART_STOPBITS_1`）及本文档、`README_J456_DRIVER.md` 一致
+- [ ] **USART1 的 `.ioc` 停止位待确认**：`.ioc` 仍写 `USART1.StopBits=STOPBITS_2`，而 `usart.c` 为 `UART_STOPBITS_1`、本文档称上位机链路 8N1 → 实际运行也是 8N1。需确认真机 USART1 确为 8N1 后同步移除该项，否则下次用 CubeMX 从该 `.ioc` 重新生成会静默把上位机链路改成 2 停止位
 
 ## 8. 时序与性能预算
 
-线上参数：115200 8N2 ≈ 95.5µs/字节（11 bit）；Modbus RTU 帧间静默 ≈ 0.3ms。
+线上参数：115200 8N1 ≈ 86.8µs/字节（10 bit）；Modbus RTU 帧间静默 ≈ 0.3ms。
 
 | 路径 | 组成 | 实测量级 |
 |------|------|---------|

@@ -8,7 +8,7 @@
 
 | 轴 | 协议 | MCU 串口 | 波特率/格式 | 备注 |
 |---|---|---|---|---|
-| J1～J3 | AI Motor Modbus RTU | USART2（左）、USART3（右） | **115200, 8N2** | 3 个 ID 轮询 |
+| J1～J3 | AI Motor Modbus RTU | USART2（左）、USART3（右） | **115200, 8N1** | 3 个 ID 轮询 |
 | J4～J6 | 慕纬度私有协议 | USART6（左）、UART5（右） | **115200, 8N1** | ID 4/5/6 |
 | 上位机 | 文本命令 | USART1 | 115200, 8N1 | DMA 空闲接收 |
 
