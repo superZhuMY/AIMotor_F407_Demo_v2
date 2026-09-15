@@ -374,7 +374,7 @@ void Aimotor_Process(void)
                 switch (motor->step) {
                 case MOTOR_STEP_WAIT_STOP:
                     motor->step = MOTOR_STEP_WRITE;
-                    defer_next_tx = 1U;
+											;
                     break;
                 case MOTOR_STEP_WAIT_WRITE:
                     motor->step = MOTOR_STEP_TRIGGER;
