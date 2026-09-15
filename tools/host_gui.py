@@ -1,17 +1,24 @@
 #!/usr/bin/env python3
 """STM32F407 双臂下位机图形化串口测试工具。"""
+import os
 import queue
 import struct
 import threading
 import time
 import tkinter as tk
-from tkinter import messagebox, ttk
+from tkinter import font as tkfont, messagebox, ttk
 
 try:
     import serial
     from serial.tools import list_ports
 except ImportError as exc:
     raise SystemExit("缺少 pyserial，请运行: python3 -m pip install pyserial") from exc
+
+# Tk 在 Linux 上把系统字体定成 12 像素的固定像素尺寸，高分屏上整体偏小，且不随 DPI 缩放。
+# 这里按倍数放大命名字体与窗口，可用环境变量覆盖：AIMOTOR_GUI_SCALE=2 python3 tools/host_gui.py
+SCALE = float(os.environ.get("AIMOTOR_GUI_SCALE") or 3.0)
+BASE_FONTS = ("TkDefaultFont","TkTextFont","TkFixedFont","TkMenuFont","TkHeadingFont",
+              "TkCaptionFont","TkSmallCaptionFont","TkIconFont","TkTooltipFont")
 
 HELLO, ENABLE, STOP, GET_STATE, DISABLE, TARGET = 1, 2, 3, 4, 5, 0x10
 ACK, STATE = 0x80, 0x81
@@ -33,6 +40,11 @@ def crc16(data):
 def packet(cmd, seq, payload=b""):
     body = struct.pack("<BBHH", 1, cmd, seq, len(payload)) + payload
     return b"\xaa\x55" + body + struct.pack("<H", crc16(body))
+
+def px(value):
+    """像素间距按 SCALE 缩放（字号放大后保持同样的留白观感）。"""
+    return value if SCALE <= 1 else max(1, round(value * SCALE))
+
 
 class Link:
     def __init__(self, events):
@@ -99,7 +111,7 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("AIMotor F407 上位机测试")
-        self.geometry("980x680")
+        self.apply_scale()
         self.events, self.link = queue.Queue(), Link(None)
         self.link.events = self.events
         self.port, self.connected = tk.StringVar(), tk.StringVar(value="未连接")
@@ -114,58 +126,87 @@ class App(tk.Tk):
         self.after(30, self.process_events)
         self.after(100, self.poll)
 
+    def apply_scale(self):
+        """按 SCALE 放大命名字体、ttk 控件内边距与窗口，解决高分屏文字过小。"""
+        if SCALE == 1:
+            self.geometry("980x680")
+            return
+        for name in BASE_FONTS:
+            try:
+                f = tkfont.nametofont(name)
+            except tk.TclError:
+                continue
+            size = f.cget("size")
+            # 负值表示像素尺寸（Linux 默认 -12），正值表示点数，两种情况都按倍数放大。
+            f.configure(size=-max(1, round(abs(size) * SCALE)) if size < 0
+                        else max(1, round(size * SCALE)))
+        style = ttk.Style(self)
+        for layout, cfg in (("TButton", {"padding": 4}), ("TCombobox", {}),
+                            ("TEntry", {}), ("TCheckbutton", {})):
+            try:
+                pad = style.lookup(layout, "padding")
+                if isinstance(pad, tuple) and pad:
+                    style.configure(layout, padding=tuple(max(1, round(p * SCALE)) for p in pad))
+                elif pad:
+                    style.configure(layout, padding=max(1, round(int(pad) * SCALE)))
+            except (tk.TclError, ValueError):
+                pass
+        w, h = self.winfo_screenwidth(), self.winfo_screenheight()
+        self.geometry(f"{min(round(1400 * SCALE), int(w * .95))}x"
+                      f"{min(round(1000 * SCALE), int(h * .9))}")
+
     def build_ui(self):
-        root = ttk.Frame(self, padding=12); root.pack(fill="both", expand=True)
-        bar = ttk.LabelFrame(root, text="串口连接", padding=10); bar.pack(fill="x")
+        root = ttk.Frame(self, padding=px(12)); root.pack(fill="both", expand=True)
+        bar = ttk.LabelFrame(root, text="串口连接", padding=px(10)); bar.pack(fill="x")
         ttk.Label(bar,text="串口").pack(side="left")
-        self.combo = ttk.Combobox(bar,textvariable=self.port,width=24,state="readonly")
-        self.combo.pack(side="left",padx=6)
+        self.combo = ttk.Combobox(bar,textvariable=self.port,width=18,state="readonly")
+        self.combo.pack(side="left",padx=px(6))
         ttk.Button(bar,text="刷新",command=self.refresh_ports).pack(side="left")
         self.conn_btn = ttk.Button(bar,text="连接",command=self.toggle)
-        self.conn_btn.pack(side="left",padx=8)
-        ttk.Label(bar,text="115200 / 8N1").pack(side="left",padx=8)
+        self.conn_btn.pack(side="left",padx=px(8))
+        ttk.Label(bar,text="115200 / 8N1").pack(side="left",padx=px(8))
         ttk.Label(bar,textvariable=self.connected).pack(side="right")
 
-        ctl = ttk.LabelFrame(root,text="控制",padding=10); ctl.pack(fill="x",pady=8)
+        ctl = ttk.LabelFrame(root,text="控制",padding=px(10)); ctl.pack(fill="x",pady=px(8))
         for text, cmd in (("HELLO",HELLO),("读取状态",GET_STATE)):
-            ttk.Button(ctl,text=text,command=lambda c=cmd:self.send(c)).pack(side="left",padx=3)
-        ttk.Button(ctl,text="使能",command=lambda:self.confirm(ENABLE,"确认执行全轴使能？")).pack(side="left",padx=3)
-        ttk.Button(ctl,text="失能",command=lambda:self.confirm(DISABLE,"确认停止并失能全部电机？")).pack(side="left",padx=3)
-        tk.Button(ctl,text="全局停止",bg="#c62828",fg="white",
-                  command=lambda:self.send(STOP,b"\x00")).pack(side="left",padx=12)
+            ttk.Button(ctl,text=text,command=lambda c=cmd:self.send(c)).pack(side="left",padx=px(3))
+        ttk.Button(ctl,text="使能",command=lambda:self.confirm(ENABLE,"确认执行全轴使能？")).pack(side="left",padx=px(3))
+        ttk.Button(ctl,text="失能",command=lambda:self.confirm(DISABLE,"确认停止并失能全部电机？")).pack(side="left",padx=px(3))
+        tk.Button(ctl,text="全局停止",bg="#c62828",fg="white",font=tkfont.nametofont("TkDefaultFont"),
+                  command=lambda:self.send(STOP,b"\x00")).pack(side="left",padx=px(12))
         ttk.Checkbutton(ctl,text="100 ms 自动刷新/保活",variable=self.auto).pack(side="right")
 
-        stat = ttk.LabelFrame(root,text="控制器状态",padding=10); stat.pack(fill="x")
+        stat = ttk.LabelFrame(root,text="控制器状态",padding=px(10)); stat.pack(fill="x")
         for name,var in (("状态",self.ctrl_state),("故障",self.fault),
                          ("有效轴",self.valid),("使能轴",self.enabled)):
-            ttk.Label(stat,text=name+":").pack(side="left",padx=(10,2))
+            ttk.Label(stat,text=name+":").pack(side="left",padx=(px(10),px(2)))
             ttk.Label(stat,textvariable=var,width=12).pack(side="left")
 
-        mid = ttk.Frame(root); mid.pack(fill="x",pady=8)
-        feedback = ttk.LabelFrame(mid,text="12轴反馈",padding=10)
-        feedback.pack(side="left",fill="both",expand=True,padx=(0,5))
+        mid = ttk.Frame(root); mid.pack(fill="x",pady=px(8))
+        feedback = ttk.LabelFrame(mid,text="12轴反馈",padding=px(10))
+        feedback.pack(side="left",fill="both",expand=True,padx=(0,px(5)))
         for col,text in enumerate(("关节","左臂","右臂")):
-            ttk.Label(feedback,text=text).grid(row=0,column=col,padx=14)
+            ttk.Label(feedback,text=text).grid(row=0,column=col,padx=px(14))
         for j in range(6):
             unit = "µm" if j < 3 else "µrad"
-            ttk.Label(feedback,text=f"J{j+1} ({unit})").grid(row=j+1,column=0,sticky="w",pady=5)
+            ttk.Label(feedback,text=f"J{j+1} ({unit})").grid(row=j+1,column=0,sticky="w",pady=px(5))
             ttk.Label(feedback,textvariable=self.pos[0][j],width=15,anchor="e").grid(row=j+1,column=1)
             ttk.Label(feedback,textvariable=self.pos[1][j],width=15,anchor="e").grid(row=j+1,column=2)
 
-        target = ttk.LabelFrame(mid,text="单臂目标",padding=10)
-        target.pack(side="left",fill="both",expand=True,padx=(5,0))
+        target = ttk.LabelFrame(mid,text="单臂目标",padding=px(10))
+        target.pack(side="left",fill="both",expand=True,padx=(px(5),0))
         ttk.Combobox(target,textvariable=self.arm,values=("左臂","右臂"),
                      width=9,state="readonly").grid(row=0,column=0)
-        ttk.Button(target,text="填入当前位置",command=self.copy_pos).grid(row=0,column=1,padx=5)
+        ttk.Button(target,text="填入当前位置",command=self.copy_pos).grid(row=0,column=1,padx=px(5))
         for j in range(6):
             unit = "µm" if j < 3 else "µrad"
-            ttk.Label(target,text=f"J{j+1} ({unit})").grid(row=j+1,column=0,sticky="w",pady=4)
-            ttk.Entry(target,textvariable=self.target[j],width=18).grid(row=j+1,column=1)
-        ttk.Button(target,text="发送 TARGET",command=self.send_target).grid(row=7,column=0,columnspan=2,sticky="ew",pady=10)
+            ttk.Label(target,text=f"J{j+1} ({unit})").grid(row=j+1,column=0,sticky="w",pady=px(4))
+            ttk.Entry(target,textvariable=self.target[j],width=16).grid(row=j+1,column=1)
+        ttk.Button(target,text="发送 TARGET",command=self.send_target).grid(row=7,column=0,columnspan=2,sticky="ew",pady=px(10))
         ttk.Label(target,text="首次测试：填入当前位置，只小改一个轴。",foreground="#9a6700").grid(row=8,column=0,columnspan=2)
 
-        box = ttk.LabelFrame(root,text="通信日志",padding=6); box.pack(fill="both",expand=True)
-        self.logs = tk.Text(box,height=9,state="disabled"); self.logs.pack(fill="both",expand=True)
+        box = ttk.LabelFrame(root,text="通信日志",padding=px(6)); box.pack(fill="both",expand=True)
+        self.logs = tk.Text(box,height=8,state="disabled"); self.logs.pack(fill="both",expand=True)
 
     def refresh_ports(self):
         ports = [p.device for p in list_ports.comports()]
