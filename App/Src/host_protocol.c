@@ -117,7 +117,7 @@ static int32_t AiPulseToUm(int32_t pulse, uint8_t joint)
     int64_t v;
     switch (joint) {
     case 0:  v = ((int64_t)pulse * 4LL) / 10LL;      break; /* ×10/4 的逆 */
-    case 1:  v = ((int64_t)pulse * 475LL) / 10000LL; break; /* ×10000/475 的逆 */
+    case 1:  v = ((int64_t)pulse * 475LL) / 1000LL;  break; /* ×1000/475 的逆 */
     default: v = ((int64_t)pulse * 2LL) / 10LL;      break; /* ×10/2 的逆 */
     }
     return ClampI32(v);
@@ -274,7 +274,7 @@ static uint8_t BinaryTargetValidateAndDispatch(uint8_t side,
         int64_t um = joints[i];
         int64_t pulse;
         if (i == 0) pulse = (um * 10LL) / 4LL;
-        else if (i == 1) pulse = (um * 10000LL) / 475LL;
+        else if (i == 1) pulse = (um * 1000LL) / 475LL;
         else pulse = (um * 10LL) / 2LL;
         if (pulse < AIMOTOR_POSITION_MIN || pulse > AIMOTOR_POSITION_MAX) {
             return AIMOTOR_ACK_OUT_OF_RANGE;
