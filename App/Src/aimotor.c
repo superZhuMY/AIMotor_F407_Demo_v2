@@ -349,20 +349,6 @@ void Aimotor_Process(void)
         uint8_t mi = (uint8_t)(motor - aimotor_motors[b]);
         uint8_t defer_next_tx = 0U;
 
-        /* 只在没有未完成请求时接收新目标，避免打断一个Modbus事务。 */
-        if (motor->cmd_pending &&
-            (motor->step == MOTOR_STEP_IDLE ||
-             motor->step == MOTOR_STEP_ARRIVED) &&
-            !motor->fault) {
-            motor->cmd_pending = 0;
-            motor->retry_count = 0;
-            motor->arrived = 0;
-            motor->arrive_count = 0;
-            motor->actual_valid = 0;   /* 新目标执行期间反馈视为非最新 */
-            motor->move_start_tick = HAL_GetTick();
-            motor->step = MOTOR_STEP_STOP;
-        }
-
         /* 处理当前请求的回包；无效回包会进入超时重试路径。 */
         if (motor->rx_ready &&
             (motor->step == MOTOR_STEP_WAIT_STOP ||
@@ -374,7 +360,7 @@ void Aimotor_Process(void)
                 switch (motor->step) {
                 case MOTOR_STEP_WAIT_STOP:
                     motor->step = MOTOR_STEP_WRITE;
-											;
+                    defer_next_tx = 1U;
                     break;
                 case MOTOR_STEP_WAIT_WRITE:
                     motor->step = MOTOR_STEP_TRIGGER;
@@ -432,6 +418,24 @@ void Aimotor_Process(void)
                     break;
                 }
             }
+        }
+
+        /*
+         * 必须在处理查询回包之后接收新目标。
+         * 否则 WAIT_QUERY 刚变成 IDLE 就会在下方重新进入 QUERY，
+         * cmd_pending 在持续轮询期间将一直得不到执行。
+         */
+        if (motor->cmd_pending &&
+            (motor->step == MOTOR_STEP_IDLE ||
+             motor->step == MOTOR_STEP_ARRIVED) &&
+            !motor->fault) {
+            motor->cmd_pending = 0;
+            motor->retry_count = 0;
+            motor->arrived = 0;
+            motor->arrive_count = 0;
+            motor->actual_valid = 0;   /* 新目标执行期间反馈视为非最新 */
+            motor->move_start_tick = HAL_GetTick();
+            motor->step = MOTOR_STEP_STOP;
         }
 
         /* 驱动器确认 STOP/WRITE 后，等到下一次 5ms 调度再发送后续命令。
