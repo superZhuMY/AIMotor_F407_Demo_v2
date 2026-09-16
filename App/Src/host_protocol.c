@@ -288,10 +288,15 @@ static uint8_t BinaryTargetValidateAndDispatch(uint8_t side,
         return AIMOTOR_ACK_OUT_OF_RANGE;
     }
 
-    /* Phase 2：全部合法，统一下发 */
+    /* Phase 2：全部合法，统一下发。
+       TARGET 是整臂帧，但 ROS 轨迹控制会重复发送保持位置；只把真正变化
+       的 AI 轴标为待执行，避免某一腕部关节运动时重新触发三个平移轴的
+       STOP → WRITE → TRIGGER 事务。 */
     for (uint8_t i = 0; i < 3; i++) {
-        aimotor_motors[side][i].target_position = (int32_t)ai_pulse[i];
-        aimotor_motors[side][i].cmd_pending = 1;
+        if (aimotor_motors[side][i].target_position != (int32_t)ai_pulse[i]) {
+            aimotor_motors[side][i].target_position = (int32_t)ai_pulse[i];
+            aimotor_motors[side][i].cmd_pending = 1;
+        }
     }
     MW_ApplyTargets(side, j4d, j5d, j6d, m4, m5, m6);
     return AIMOTOR_ACK_OK;

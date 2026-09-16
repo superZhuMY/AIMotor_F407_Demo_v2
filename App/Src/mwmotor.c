@@ -519,23 +519,34 @@ uint8_t MW_ForwardKin(uint8_t side, int64_t j4_deg1000, int64_t j5_deg1000,
     return 0;
 }
 
-/* 将已验证的换算结果写入电机状态：J4 独立目标 + J5/J6 耦合 pending。 */
+/* 将已验证的换算结果写入电机状态：J4 独立目标 + J5/J6 耦合 pending。
+   二进制 TARGET 是整臂帧，不能因重复的保持目标重新启动未变化的关节。
+   这使 ROS 上位机可以在每个控制周期写入完整 6 关节目标，而仅让变化
+   的电机开启一次新的点位事务。 */
 void MW_ApplyTargets(uint8_t side, int64_t j4_deg1000, int64_t j5_deg1000,
                      int64_t j6_deg1000, int64_t m4, int64_t m5, int64_t m6)
 {
     if (side >= MW_BUS_COUNT) return;
     (void)j4_deg1000;   /* J4 无耦合，电机目标 m4 已等于关节目标 */
 
-    mw_motors[side][0].target_angle = m4;
-    mw_motors[side][0].cmd_pending = 1;
-    mw_motors[side][0].actual_valid = 0;   /* 新目标执行期间反馈视为非最新 */
-    mw_motors[side][1].actual_valid = 0;
-    mw_motors[side][2].actual_valid = 0;
-    mw_coupled[side].requested_j5_deg1000 = j5_deg1000;
-    mw_coupled[side].requested_j6_deg1000 = j6_deg1000;
-    mw_coupled[side].pending_motor5_target = m5;
-    mw_coupled[side].pending_motor6_target = m6;
-    mw_coupled[side].pending = 1;
+    if (mw_motors[side][0].target_angle != m4) {
+        mw_motors[side][0].target_angle = m4;
+        mw_motors[side][0].cmd_pending = 1;
+        mw_motors[side][0].actual_valid = 0;  /* 新 J4 目标使反馈过期 */
+    }
+
+    if (mw_coupled[side].requested_j5_deg1000 != j5_deg1000 ||
+        mw_coupled[side].requested_j6_deg1000 != j6_deg1000 ||
+        mw_coupled[side].pending_motor5_target != m5 ||
+        mw_coupled[side].pending_motor6_target != m6) {
+        mw_motors[side][1].actual_valid = 0;
+        mw_motors[side][2].actual_valid = 0;
+        mw_coupled[side].requested_j5_deg1000 = j5_deg1000;
+        mw_coupled[side].requested_j6_deg1000 = j6_deg1000;
+        mw_coupled[side].pending_motor5_target = m5;
+        mw_coupled[side].pending_motor6_target = m6;
+        mw_coupled[side].pending = 1;
+    }
 }
 
 /* 二进制 TARGET 的 MW 侧入口：µrad → deg×1000 → 共享换算 → 下发。
